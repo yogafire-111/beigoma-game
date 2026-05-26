@@ -28,8 +28,8 @@ const PHYSICS = {
   JUMP_HEIGHT_MAX:  18,        // px of upward visual offset during jump
 
   // Hajiki drift
-  HAJIKI_DRIFT_STRENGTH: 0.00055, // random lateral force per frame
-  HAJIKI_DRIFT_CHANGE:   0.04,    // how often drift direction shifts (per frame probability)
+  HAJIKI_DRIFT_STRENGTH: 0.00018, // reduced -- erratic but not chaotic
+  HAJIKI_DRIFT_CHANGE:   0.018,   // direction shifts less often
 
   // Sharp tip sticking (Riki, Maru)
   STICK_CHANCE:     0.0006,    // per-frame probability when near center
@@ -373,7 +373,7 @@ function _applyCollisionSpinLoss(instance, opponent, force) {
   // Heavier, higher-impact opponents cause more spin loss
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-  const loss      = force * 0.006 * impactMod * massMod * (1.1 - instance.def.stability);
+  const loss      = force * 0.014 * impactMod * massMod * (1.1 - instance.def.stability);
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
   // Side contact if hit hard enough relative to stability

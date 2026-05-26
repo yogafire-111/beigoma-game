@@ -63,20 +63,30 @@ let cpuAnimating    = false;
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
 function spawnSparks(x, y, force) {
-  const count = Math.floor(4 + force * 18);
+  const count = Math.floor(8 + force * 32);
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 1.5 + Math.random() * force * 6;
+    const speed = 2.5 + Math.random() * force * 10;
     particles.push({
       x, y,
-      vx:      Math.cos(angle) * speed,
-      vy:      Math.sin(angle) * speed,
-      life:    1.0,
-      decay:   0.045 + Math.random() * 0.04,
-      size:    1.5 + Math.random() * 2,
-      color:   Math.random() < 0.6 ? '#FFD700' : '#FF6600',
+      vx:    Math.cos(angle) * speed,
+      vy:    Math.sin(angle) * speed,
+      life:  1.0,
+      decay: 0.028 + Math.random() * 0.025,
+      size:  2.5 + Math.random() * 3.5,
+      color: Math.random() < 0.5 ? '#FFD700' :
+             Math.random() < 0.7 ? '#FF6600' : '#FFFFFF',
     });
   }
+  // Add a brief flash ring at impact point
+  particles.push({
+    x, y,
+    vx: 0, vy: 0,
+    life: 1.0, decay: 0.12,
+    size: 18 + force * 20,
+    color: 'rgba(255,240,180,0.5)',
+    isFlash: true,
+  });
 }
 
 function updateParticles() {
@@ -94,10 +104,17 @@ function drawParticles() {
   for (const p of particles) {
     ctx.save();
     ctx.globalAlpha = p.life;
-    ctx.fillStyle   = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-    ctx.fill();
+    if (p.isFlash) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+    } else {
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 }
