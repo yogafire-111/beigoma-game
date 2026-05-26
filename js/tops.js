@@ -1,297 +1,452 @@
+// tops.js
+// Top definitions, stats, drawing functions
+// No dependencies on other game modules
 
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ベイゴマバトル</title>
-  <link rel="stylesheet" href="css/style.css" />
-</head>
-<body>
+// ─── Top Definitions ────────────────────────────────────────────────────────
 
-  <!-- ─── Main Layout ─────────────────────────────────────────── -->
-  <div id="app">
+const TOP_DEFS = {
+  nomaru: {
+    id:          'nomaru',
+    hiragana:    'のーまる',
+    color:       '#C0C0C0',   // silver
+    colorDim:    '#888888',
+    profile:     'hexagon',
+    tipType:     'round',
+    spinDuration: 40,         // seconds at ideal conditions
+    impactForce:  1.0,
+    deflection:   0.5,
+    drift:        0.5,
+    stability:    0.6,
+    mass:         1.0,
+    radius:       32,         // canvas pixels
+  },
 
-    <!-- Left: Arena -->
-    <div id="arena-wrap">
-      <canvas id="arena"></canvas>
-    </div>
+  riki: {
+    id:          'riki',
+    hiragana:    'りき',
+    color:       '#1a2744',   // dark navy
+    colorDim:    '#0d1422',
+    profile:     'hexagon',
+    tipType:     'fine',
+    spinDuration: 60,
+    impactForce:  0.8,
+    deflection:   0.3,
+    drift:        0.3,
+    stability:    0.9,
+    mass:         0.8,
+    radius:       30,
+  },
 
-    <!-- Right: UI Panel -->
-    <div id="panel">
+  maru: {
+    id:          'maru',
+    hiragana:    'まる',
+    color:       '#9DC416',   // yellow-green
+    colorDim:    '#5a7a0a',
+    profile:     'circle',
+    tipType:     'fine',
+    spinDuration: 50,
+    impactForce:  0.6,
+    deflection:   0.8,
+    drift:        0.4,
+    stability:    0.7,
+    mass:         0.7,
+    radius:       26,
+  },
 
-      <h1 id="game-title">ベイゴマ<span>バトル</span></h1>
+  hajiki: {
+    id:          'hajiki',
+    hiragana:    'はじき',
+    color:       '#CC2200',   // red
+    colorDim:    '#7a1500',
+    profile:     'hexagon',
+    tipType:     'flat',
+    spinDuration: 25,
+    impactForce:  1.5,
+    deflection:   0.6,
+    drift:        0.9,
+    stability:    0.35,
+    mass:         0.75,
+    radius:       28,
+  },
+};
 
-      <!-- Top Selection (shown before launch) -->
-      <section id="selection-section" class="panel-section">
-        <h2>こまを えらぶ</h2>
-        <div id="top-cards"></div>
+// Order for UI display
+const TOP_ORDER = ['nomaru', 'riki', 'maru', 'hajiki'];
 
-        <!-- Three-view display canvas -->
-        <div id="three-view-wrap">
-          <canvas id="three-view-canvas" width="240" height="110"></canvas>
-          <div id="three-view-label"></div>
-        </div>
+// ─── Alignment ──────────────────────────────────────────────────────────────
 
-        <button id="confirm-btn" class="btn-primary" disabled>けってい！</button>
-      </section>
+// Returns a random tip-to-CoM alignment float in [0.8, 1.0]
+// 1.0 = perfect, lower = more wobble and faster spin decay
+function randomAlignment() {
+  return 0.8 + Math.random() * 0.2;
+}
 
-      <!-- Match Info (shown during battle) -->
-      <section id="match-section" class="panel-section hidden">
-        <div id="match-tops">
-          <div class="match-top-card" id="player-card">
-            <div class="match-top-label">あなた</div>
-            <canvas class="match-top-view" width="80" height="80"></canvas>
-            <div class="match-top-name" id="player-top-name"></div>
-            <div class="spin-bar-wrap">
-              <div class="spin-bar" id="player-spin-bar"></div>
-            </div>
-          </div>
+// ─── Top Instance Factory ───────────────────────────────────────────────────
 
-          <div id="vs-label">VS</div>
+// Creates a live top instance from a definition.
+// owner: 'player' | 'cpu'
+function createTopInstance(defId, owner) {
+  const def = TOP_DEFS[defId];
+  if (!def) throw new Error(`Unknown top id: ${defId}`);
 
-          <div class="match-top-card" id="cpu-card">
-            <div class="match-top-label">CPU</div>
-            <canvas class="match-top-view" width="80" height="80"></canvas>
-            <div class="match-top-name" id="cpu-top-name"></div>
-            <div class="spin-bar-wrap">
-              <div class="spin-bar" id="cpu-spin-bar"></div>
-            </div>
-          </div>
-        </div>
+  return {
+    // identity
+    defId,
+    owner,
+    def,                          // reference to static def
 
-        <div id="personality-display">
-          CPU: <span id="personality-label"></span>
-        </div>
+    // physics state (populated by physics.js when body is created)
+    body:        null,            // Matter.js body
+    spinSpeed:   0,               // current spin rate (rad/s equivalent, 0–1 normalized)
+    angle:       0,               // current visual rotation (radians)
+    tilt:        0,               // 0 = upright, 1 = fallen (for visual wobble)
+    sideContact: false,           // true when sides are rubbing canvas
 
-        <button id="launch-btn" class="btn-primary" style="margin-top:12px">
-          なげる！
-        </button>
+    // alignment (randomized at match start)
+    alignment:   randomAlignment(),
 
-        <button id="restart-btn" class="btn-primary hidden" style="margin-top:8px">
-          もう一回
-        </button>
-      </section>
+    // match tracking
+    hasContacted: false,          // has this top touched an opponent?
+    alive:        true,           // false once spin < threshold and falling
+    opacity:      1.0,            // for fade-out
 
-      <!-- Player Stats -->
-      <section id="stats-section" class="panel-section">
-        <h2>スキル</h2>
-        <div id="skill-display">
-          <div id="skill-bar-wrap">
-            <div id="skill-bar"></div>
-          </div>
-          <div id="skill-value"></div>
-        </div>
-      </section>
+    // launch state
+    launched:    false,
+  };
+}
 
-      <!-- Match History -->
-      <section id="history-section" class="panel-section">
-        <h2>せんせき</h2>
-        <div id="history-list"></div>
-        <button id="reset-btn" class="btn-small">リセット</button>
-      </section>
+// ─── Drawing ────────────────────────────────────────────────────────────────
 
-    </div><!-- /panel -->
-  </div><!-- /app -->
+// Draw a hexagon path centered at (0,0) with given radius.
+// ctx should already be translated/rotated to top center.
+function hexPath(ctx, r) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (Math.PI / 3) * i - Math.PI / 6;
+    i === 0
+      ? ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r)
+      : ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.closePath();
+}
 
-  <!-- ─── Scripts ──────────────────────────────────────────────── -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-  <script src="js/tops.js"></script>
-  <script src="js/physics.js"></script>
-  <script src="js/game.js"></script>
-  <script src="js/main.js"></script>
+// Draw ribbed lines pattern for りき (riki)
+function drawRikiRibs(ctx, r, angle) {
+  ctx.save();
+  ctx.rotate(angle);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 1.5;
+  const ribCount = 6;
+  for (let i = 0; i < ribCount; i++) {
+    const a = (Math.PI / ribCount) * i;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r * 0.25, Math.sin(a) * r * 0.25);
+    ctx.lineTo(Math.cos(a) * r * 0.85, Math.sin(a) * r * 0.85);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
-  <!-- ─── UI Logic ─────────────────────────────────────────────── -->
-  <script>
-    // ── Top Selection ──────────────────────────────────────────
+// Draw slash marks pattern for はじき (hajiki)
+function drawHajikiSlashes(ctx, r, angle) {
+  ctx.save();
+  ctx.rotate(angle);
+  ctx.strokeStyle = 'rgba(255,220,200,0.35)';
+  ctx.lineWidth = 2;
+  const slashes = [
+    [-r * 0.5,  r * 0.15,  r * 0.1,  -r * 0.55],
+    [ r * 0.1,  r * 0.55,  r * 0.55, -r * 0.1],
+    [-r * 0.15, -r * 0.4,  r * 0.4,   r * 0.15],
+  ];
+  slashes.forEach(([x1, y1, x2, y2]) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  });
+  ctx.restore();
+}
 
-    let _selectedTopId   = null;
-    let _onSelectionDone = null;
+// Draw radial tick marks on rim (spin indicator)
+// tickPhase: driven by accumulated rotation so ticks appear to spin
+function drawRimTicks(ctx, r, tickPhase, spinSpeed) {
+  const tickCount = 12;
+  const alpha = 0.4 + spinSpeed * 0.55;
+  ctx.save();
+  ctx.rotate(tickPhase);
+  ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
+  ctx.lineWidth = 2.5;
+  for (let i = 0; i < tickCount; i++) {
+    const a = (Math.PI * 2 / tickCount) * i;
+    const inner = r * 0.68;
+    const outer = r * 0.95;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
+    ctx.lineTo(Math.cos(a) * outer, Math.sin(a) * outer);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
 
-    // Called by main.js initGame()
-    function showTopSelection(callback) {
-      _onSelectionDone = callback;
-      _selectedTopId   = null;
+// Draw motion blur ring (spin indicator)
+// blurAlpha driven by spinSpeed
+function drawSpinBlur(ctx, r, spinSpeed, angle) {
+  if (spinSpeed < 0.08) return;
 
-      document.getElementById('selection-section').classList.remove('hidden');
-      document.getElementById('match-section').classList.add('hidden');
-      document.getElementById('confirm-btn').disabled = true;
+  // Outer blur ring
+  const ringAlpha = Math.min(spinSpeed * 0.7, 0.55);
+  const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.05);
+  grad.addColorStop(0,   `rgba(255,255,255,0)`);
+  grad.addColorStop(0.5, `rgba(255,255,255,${ringAlpha * 0.4})`);
+  grad.addColorStop(0.85,`rgba(255,255,255,${ringAlpha})`);
+  grad.addColorStop(1,   `rgba(255,255,255,0)`);
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
 
-      _buildTopCards();
-      _updateHistory();
-      _updateStats();
+  // Rotating blur streaks -- arcs that smear around the body
+  if (spinSpeed > 0.15) {
+    const streakAlpha = Math.min((spinSpeed - 0.15) * 1.2, 0.6);
+    const streakCount = 4;
+    ctx.save();
+    ctx.rotate(angle);
+    for (let i = 0; i < streakCount; i++) {
+      const startAngle = (Math.PI * 2 / streakCount) * i;
+      const arcLen     = Math.PI * 0.38 * spinSpeed;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 0.72, startAngle, startAngle + arcLen);
+      ctx.strokeStyle = `rgba(255,255,255,${streakAlpha})`;
+      ctx.lineWidth   = r * 0.28;
+      ctx.stroke();
     }
+    ctx.restore();
+  }
+}
 
-    function _buildTopCards() {
-      const container = document.getElementById('top-cards');
-      container.innerHTML = '';
+// Draw shadow at base (depth cue)
+function drawShadow(ctx, r) {
+  const grad = ctx.createRadialGradient(3, 4, r * 0.1, 3, 4, r * 1.1);
+  grad.addColorStop(0,   'rgba(0,0,0,0.28)');
+  grad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(3, 4, r, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
 
-      Tops.TOP_ORDER.forEach(id => {
-        const def  = Tops.TOP_DEFS[id];
-        const card = document.createElement('div');
-        card.className  = 'top-card';
-        card.dataset.id = id;
+// Tilt indicator ring -- shown during launch drag
+// tiltAmount: 0 (flat) to 1 (very steep / will fall over)
+function drawTiltRing(ctx, r, tiltAmount) {
+  const ringR = r + 8;
+  // Color shifts green -> yellow -> red with tilt
+  const red   = Math.min(255, Math.round(tiltAmount * 2 * 255));
+  const green = Math.min(255, Math.round((1 - tiltAmount) * 2 * 255));
+  ctx.beginPath();
+  ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(${red},${green},40,0.85)`;
+  ctx.lineWidth = 2.5;
+  ctx.setLineDash([4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
 
-        card.innerHTML = `
-          <div class="top-card-swatch" style="background:${def.color}"></div>
-          <div class="top-card-name">${def.hiragana}</div>
-          <div class="top-card-stats">
-            ${_statBar('スピン', def.spinDuration / 60)}
-            ${_statBar('ちから', def.impactForce / 1.5)}
-            ${_statBar('あんてい', def.stability)}
-          </div>
-        `;
+// Main draw function for a top instance.
+// Call with ctx already translated to top's canvas position.
+// instance: top instance object
+// tickPhase: accumulated rotation angle (drives rim ticks visual)
+// showTilt: bool -- show tilt ring (during launch drag)
+// tiltAmount: 0–1
+function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
+  const { def, spinSpeed, angle, tilt, opacity } = instance;
+  const r = def.radius;
 
-        card.addEventListener('click', () => _selectTop(id));
-        container.appendChild(card);
-      });
-    }
+  ctx.save();
+  ctx.globalAlpha = opacity;
 
-    function _statBar(label, value) {
-      const pct = Math.round(Math.min(value, 1) * 100);
-      return `
-        <div class="stat-row">
-          <span class="stat-label">${label}</span>
-          <div class="stat-bar-bg">
-            <div class="stat-bar-fill" style="width:${pct}%"></div>
-          </div>
-        </div>`;
-    }
+  // Shadow
+  drawShadow(ctx, r);
 
-    function _selectTop(id) {
-      _selectedTopId = id;
+  // Wobble skew: as tilt increases, squash the top slightly
+  if (tilt > 0) {
+    const skew = tilt * 0.25;
+    ctx.transform(1, 0, skew, 1 - tilt * 0.1, 0, 0);
+  }
 
-      // Highlight selected card
-      document.querySelectorAll('.top-card').forEach(c => {
-        c.classList.toggle('selected', c.dataset.id === id);
-      });
+  // Rotate to current angle
+  ctx.rotate(angle);
 
-      // Update three-view canvas
-      const canvas = document.getElementById('three-view-canvas');
-      Tops.drawThreeView(canvas, id);
-      document.getElementById('three-view-label').textContent = Tops.TOP_DEFS[id].hiragana;
+  // Body fill
+  if (def.profile === 'hexagon') {
+    hexPath(ctx, r);
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+  }
 
-      document.getElementById('confirm-btn').disabled = false;
-    }
+  // Radial gradient for depth
+  const bodyGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.05, 0, 0, r);
+  bodyGrad.addColorStop(0, lighten(def.color, 0.35));
+  bodyGrad.addColorStop(1, def.color);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
 
-    document.getElementById('confirm-btn').addEventListener('click', () => {
-      if (!_selectedTopId) return;
+  // Edge stroke
+  ctx.strokeStyle = darken(def.color, 0.3);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 
-      // Hide selection, show match UI
-      document.getElementById('selection-section').classList.add('hidden');
-      document.getElementById('match-section').classList.remove('hidden');
+  // Pattern overlay
+  if (def.id === 'riki')   drawRikiRibs(ctx, r, 0);
+  if (def.id === 'hajiki') drawHajikiSlashes(ctx, r, 0);
 
-      // Trigger game start
-      if (_onSelectionDone) _onSelectionDone(_selectedTopId);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = opacity;
 
-      // Update match UI once game state is ready
-      requestAnimationFrame(_updateMatchUI);
-    });
+  // Spin blur (not rotated with body -- streaks rotate independently)
+  drawSpinBlur(ctx, r, spinSpeed, tickPhase);
 
-    document.getElementById('launch-btn').addEventListener('click', () => {
-      if (typeof handlePlayerLaunchButton === 'function') {
-        handlePlayerLaunchButton();
-      }
-    });
+  // Rim ticks
+  drawRimTicks(ctx, r, tickPhase, spinSpeed);
 
-    // ── Match UI ───────────────────────────────────────────────
+  // Tilt indicator ring (during launch)
+  if (showTilt) {
+    drawTiltRing(ctx, r, tiltAmount);
+  }
 
-    function _updateMatchUI() {
-      const gs = Game.getGameState();
-      if (!gs.playerTop || !gs.cpuTop) return;
+  ctx.restore();
+}
 
-      // Player top view
-      const pCanvas = document.querySelector('#player-card .match-top-view');
-      Tops.drawThreeView(pCanvas, gs.playerTop.defId);
-      document.getElementById('player-top-name').textContent = gs.playerTop.def.hiragana;
+// ─── Three-View Display ──────────────────────────────────────────────────────
+// Draws top/front/side schematic for the selection panel.
+// Returns nothing; draws onto provided canvas element directly.
 
-      // CPU top view
-      const cCanvas = document.querySelector('#cpu-card .match-top-view');
-      Tops.drawThreeView(cCanvas, gs.cpuTop.defId);
-      document.getElementById('cpu-top-name').textContent = gs.cpuTop.def.hiragana;
+function drawThreeView(canvas, defId) {
+  const def = TOP_DEFS[defId];
+  if (!def) return;
 
-      // Personality
-      const personalityMap = {
-        aggressive: 'こうげき',
-        defensive:  'ぼうぎょ',
-        standard:   'ふつう',
-      };
-      document.getElementById('personality-label').textContent =
-        personalityMap[gs.cpuPersonality] || gs.cpuPersonality;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
 
-      // Start spin bar update loop
-      _updateSpinBars();
-    }
+  const panelW = w / 3;
+  const cx = panelW / 2;
 
-    function _updateSpinBars() {
-      const gs = Game.getGameState();
-      if (gs.phase === 'result') return;
+  // Labels
+  ctx.font = '10px monospace';
+  ctx.fillStyle = '#aaa';
+  ctx.textAlign = 'center';
+  ctx.fillText('上',   cx,            14);
+  ctx.fillText('前',   cx + panelW,   14);
+  ctx.fillText('横',   cx + panelW*2, 14);
 
-      if (gs.playerTop) {
-        const pct = Math.round(gs.playerTop.spinSpeed * 100);
-        document.getElementById('player-spin-bar').style.width = pct + '%';
-        document.getElementById('player-spin-bar').style.background =
-          _spinColor(gs.playerTop.spinSpeed);
-      }
-      if (gs.cpuTop) {
-        const pct = Math.round(gs.cpuTop.spinSpeed * 100);
-        document.getElementById('cpu-spin-bar').style.width = pct + '%';
-        document.getElementById('cpu-spin-bar').style.background =
-          _spinColor(gs.cpuTop.spinSpeed);
-      }
+  // ── Top view (birds eye) ──
+  ctx.save();
+  ctx.translate(cx, h / 2 + 4);
+  const r = def.radius;
+  if (def.profile === 'hexagon') {
+    hexPath(ctx, r);
+  } else {
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+  }
+  ctx.fillStyle = def.color;
+  ctx.fill();
+  ctx.strokeStyle = darken(def.color, 0.35);
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
 
-      requestAnimationFrame(_updateSpinBars);
-    }
+  // ── Front view (silhouette) ──
+  ctx.save();
+  ctx.translate(cx + panelW, h / 2 + 4);
+  drawSideProfile(ctx, def, false);
+  ctx.restore();
 
-    function _spinColor(speed) {
-      if (speed > 0.5) return '#4dff91';
-      if (speed > 0.2) return '#FFD700';
-      return '#FF6644';
-    }
+  // ── Side view ──
+  ctx.save();
+  ctx.translate(cx + panelW * 2, h / 2 + 4);
+  drawSideProfile(ctx, def, true);
+  ctx.restore();
+}
 
-    // ── Stats ──────────────────────────────────────────────────
+// Draw a simplified side/front profile silhouette
+function drawSideProfile(ctx, def, rotated) {
+  const r  = def.radius;
+  const h2 = r * 1.1;  // half-height of top body
 
-    function _updateStats() {
-      const gs  = Game.getGameState();
-      const pct = gs.playerSkill;
-      document.getElementById('skill-bar').style.width  = pct + '%';
-      document.getElementById('skill-value').textContent = `Lv ${gs.playerSkill}`;
-    }
+  ctx.save();
+  if (rotated) ctx.rotate(Math.PI / 6); // slight angle for side view
 
-    // ── History ────────────────────────────────────────────────
+  // Body outline -- tapered trapezoid
+  ctx.beginPath();
+  const topW   = def.profile === 'circle' ? r * 0.9 : r * 0.95;
+  const bottomW = r * 0.12; // tapers to tip
+  ctx.moveTo(-topW, -h2);
+  ctx.lineTo( topW, -h2);
+  ctx.lineTo( bottomW,  h2 * 0.7);
+  ctx.lineTo(-bottomW,  h2 * 0.7);
+  ctx.closePath();
+  ctx.fillStyle = def.color;
+  ctx.fill();
+  ctx.strokeStyle = darken(def.color, 0.35);
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-    function _updateHistory() {
-      const history = Game.getMatchHistory();
-      const list    = document.getElementById('history-list');
-      list.innerHTML = '';
+  // Tip
+  if (def.tipType === 'flat') {
+    ctx.beginPath();
+    ctx.moveTo(-bottomW * 1.8, h2 * 0.7);
+    ctx.lineTo( bottomW * 1.8, h2 * 0.7);
+    ctx.strokeStyle = darken(def.color, 0.5);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  } else {
+    // pointed tip
+    ctx.beginPath();
+    ctx.moveTo(-bottomW, h2 * 0.7);
+    ctx.lineTo(0, h2 * 1.0);
+    ctx.lineTo( bottomW, h2 * 0.7);
+    ctx.fillStyle = darken(def.color, 0.4);
+    ctx.fill();
+  }
 
-      if (history.length === 0) {
-        list.innerHTML = '<div class="history-empty">まだ せんせきなし</div>';
-        return;
-      }
+  ctx.restore();
+}
 
-      history.slice(0, 10).forEach(entry => {
-        const row  = document.createElement('div');
-        row.className = 'history-row';
-        const icon = entry.result === 'player_win' ? '⭕' :
-                     entry.result === 'cpu_win'    ? '❌' : '△';
-        const date = new Date(entry.date);
-        const dateStr = `${date.getMonth()+1}/${date.getDate()}`;
-        row.innerHTML = `<span class="history-icon">${icon}</span>
-                         <span class="history-date">${dateStr}</span>
-                         <span class="history-skill">Lv${entry.skill}</span>`;
-        list.appendChild(row);
-      });
-    }
+// ─── Color Utilities ─────────────────────────────────────────────────────────
 
-    document.getElementById('reset-btn').addEventListener('click', () => {
-      if (confirm('せんせきを リセットしますか？')) {
-        Game.resetProgress();
-        _updateHistory();
-        _updateStats();
-      }
-    });
-  </script>
+function hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return [r, g, b];
+}
 
-</body>
-</html>
+function lighten(hex, amount) {
+  const [r,g,b] = hexToRgb(hex);
+  const l = (c) => Math.min(255, Math.round(c + (255 - c) * amount));
+  return `rgb(${l(r)},${l(g)},${l(b)})`;
+}
+
+function darken(hex, amount) {
+  const [r,g,b] = hexToRgb(hex);
+  const d = (c) => Math.max(0, Math.round(c * (1 - amount)));
+  return `rgb(${d(r)},${d(g)},${d(b)})`;
+}
+
+// ─── Exports ─────────────────────────────────────────────────────────────────
+
+// For plain-script (non-module) use, attach to window
+if (typeof window !== 'undefined') {
+  window.Tops = {
+    TOP_DEFS,
+    TOP_ORDER,
+    randomAlignment,
+    createTopInstance,
+    drawTop,
+    drawThreeView,
+  };
+}
