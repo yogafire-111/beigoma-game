@@ -11,8 +11,9 @@ const PHYSICS = {
 
   // Bowl
   BOWL_TENSION:     0.5,       // 0 = flat, 1 = steep funnel
-  BOWL_FORCE_MAX:   0.0035,    // stronger bowl to contain fast tops
-  BOWL_CENTER_DEAD: 0.08,      // fraction of radius where bowl is flat (no force)
+  BOWL_FORCE_MAX:   0.0012,    // gentle inward pull
+  BOWL_DAMPING:     0.0018,    // velocity damping -- creates spiral, kills pendulum
+  BOWL_CENTER_DEAD: 0.08,      // fraction of radius where bowl is flat
 
   // Out of bounds
   EJECT_RADIUS:     1.08,      // fraction of ARENA_RADIUS before top is ejected
@@ -162,18 +163,10 @@ function updatePhysics(instances) {
       if (onTopDied) onTopDied(instance);
     }
 
-    // ── Dead top friction -- slow sliding quickly ──
+    // ── Dead top -- stop immediately, fade out ──
     if (!instance.alive) {
-      const vel    = body.velocity;
-      const speed  = Math.hypot(vel.x, vel.y);
-      if (speed > 0.05) {
-        Matter.Body.setVelocity(body, {
-          x: vel.x * 0.88,
-          y: vel.y * 0.88,
-        });
-      } else {
-        Matter.Body.setVelocity(body, { x: 0, y: 0 });
-      }
+      Matter.Body.setVelocity(body, { x: 0, y: 0 });
+      Matter.Body.setAngularVelocity(body, 0);
       instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
       continue;
     }
@@ -228,19 +221,28 @@ function _applyBowlForce(body, dx, dy, dist) {
 
   if (dist < deadZone) return;
 
-  // Normalised distance from center (0 at center, 1 at rim)
-  const t = Math.min(dist / r, 1.0);
-
-  // Bowl shape: steeper near rim, flatter near center
-  // BOWL_TENSION controls how curved the bowl is
+  const t       = Math.min(dist / r, 1.0);
   const tension = PHYSICS.BOWL_TENSION;
   const slope   = Math.pow(t, 1.5 + tension);
 
+  // Inward pull -- gentle, just enough to spiral toward center
   const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
   const fx = -(dx / dist) * forceMag;
   const fy = -(dy / dist) * forceMag;
-
   Matter.Body.applyForce(body, body.position, { x: fx, y: fy });
+
+  // Velocity damping -- kills the pendulum oscillation.
+  // Simulates canvas friction on the tip as the top moves laterally.
+  // This is what creates the spiral-inward behavior instead of swinging.
+  const vel    = body.velocity;
+  const speed  = Math.hypot(vel.x, vel.y);
+  if (speed > 0.01) {
+    const damp = PHYSICS.BOWL_DAMPING * body.mass;
+    Matter.Body.applyForce(body, body.position, {
+      x: -(vel.x / speed) * damp * speed,
+      y: -(vel.y / speed) * damp * speed,
+    });
+  }
 }
 
 // ─── Hajiki Drift ────────────────────────────────────────────────────────────
@@ -334,58 +336,100 @@ function _triggerJump(pstate) {
 // ─── Collision Handler ───────────────────────────────────────────────────────
 
 function _attachCollisionHandler() {
+  // Initial impact
   Matter.Events.on(engine, 'collisionStart', (event) => {
-    const pairs = event.pairs;
-    for (const pair of pairs) {
-      const { bodyA, bodyB } = pair;
-      if (bodyA.label === 'arena_wall' || bodyB.label === 'arena_wall') continue;
+    _handleCollisionPairs(event.pairs, true);
+  });
 
-      // Find matching instances
-      const instA = _findInstanceByBody(bodyA);
-      const instB = _findInstanceByBody(bodyB);
-      if (!instA || !instB) continue;
-      if (!instA.alive || !instB.alive) continue;
-
-      // Relative velocity magnitude = impact force proxy
-      const rvx   = bodyA.velocity.x - bodyB.velocity.x;
-      const rvy   = bodyA.velocity.y - bodyB.velocity.y;
-      const force = Math.hypot(rvx, rvy);
-
-      // Mark contact
-      instA.hasContacted = true;
-      instB.hasContacted = true;
-
-      // Apply spin loss proportional to impact and mass ratio
-      _applyCollisionSpinLoss(instA, instB, force);
-      _applyCollisionSpinLoss(instB, instA, force);
-
-      // Deflection modifier by top type
-      _applyDeflection(instA, bodyA, bodyB, force);
-      _applyDeflection(instB, bodyB, bodyA, force);
-
-      // Rare jump
-      if (force > PHYSICS.JUMP_FORCE_MIN && Math.random() < PHYSICS.JUMP_CHANCE) {
-        const pstateA = topPhysState[_instanceId(instA)];
-        const pstateB = topPhysState[_instanceId(instB)];
-        if (pstateA) _triggerJump(pstateA);
-        if (pstateB && Math.random() < 0.4) _triggerJump(pstateB);
-      }
-
-      // Notify game.js
-      if (onCollision) onCollision(instA, instB, force);
-    }
+  // Sustained contact -- runs every frame while touching
+  // Scaled down vs initial impact but accumulates over time
+  Matter.Events.on(engine, 'collisionActive', (event) => {
+    _handleCollisionPairs(event.pairs, false);
   });
 }
 
-function _applyCollisionSpinLoss(instance, opponent, force) {
-  // Heavier, higher-impact opponents cause more spin loss
+function _handleCollisionPairs(pairs, isInitial) {
+  for (const pair of pairs) {
+    const { bodyA, bodyB } = pair;
+    if (bodyA.label === 'arena_wall' || bodyB.label === 'arena_wall') continue;
+
+    const instA = _findInstanceByBody(bodyA);
+    const instB = _findInstanceByBody(bodyB);
+    if (!instA || !instB) continue;
+    if (!instA.alive || !instB.alive) continue;
+
+    const rvx   = bodyA.velocity.x - bodyB.velocity.x;
+    const rvy   = bodyA.velocity.y - bodyB.velocity.y;
+    const force = Math.hypot(rvx, rvy);
+
+    instA.hasContacted = true;
+    instB.hasContacted = true;
+
+    if (isInitial) {
+      // Sharp impact -- full spin loss
+      _applyCollisionSpinLoss(instA, instB, force, 1.0);
+      _applyCollisionSpinLoss(instB, instA, force, 1.0);
+      _applyDeflection(instA, bodyA, bodyB, force);
+      _applyDeflection(instB, bodyB, bodyA, force);
+
+      // Riki hexagon edge -- periodic sharp impulse
+      if (instA.defId === 'riki' || instB.defId === 'riki') {
+        _applyHexagonImpulse(instA, instB, bodyA, bodyB);
+      }
+
+      // Rare jump on high impact
+      if (force > PHYSICS.JUMP_FORCE_MIN && Math.random() < PHYSICS.JUMP_CHANCE) {
+        const pA = topPhysState[_instanceId(instA)];
+        const pB = topPhysState[_instanceId(instB)];
+        if (pA) _triggerJump(pA);
+        if (pB && Math.random() < 0.4) _triggerJump(pB);
+      }
+
+      if (onCollision) onCollision(instA, instB, force);
+
+    } else {
+      // Sustained grinding contact -- smaller per-frame loss
+      // Only significant if they're actually rubbing (low relative velocity)
+      if (force < 1.5) {
+        _applyCollisionSpinLoss(instA, instB, 0.4, 0.08);
+        _applyCollisionSpinLoss(instB, instA, 0.4, 0.08);
+      }
+    }
+  }
+}
+
+function _applyHexagonImpulse(instA, instB, bodyA, bodyB) {
+  // When Riki's hexagon edge rotates past contact point, it creates
+  // a periodic sharp push rather than smooth sliding
+  const rikiInst = instA.defId === 'riki' ? instA : instB;
+  const rikiBody = instA.defId === 'riki' ? bodyA : bodyB;
+  const otherBody = instA.defId === 'riki' ? bodyB : bodyA;
+  const otherInst = instA.defId === 'riki' ? instB : instA;
+
+  // Impulse fires based on rotation phase (6 edges = every PI/3 radians)
+  const phase = rikiBody.angle % (Math.PI / 3);
+  if (phase < 0.15) {
+    const awayX = otherBody.position.x - rikiBody.position.x;
+    const awayY = otherBody.position.y - rikiBody.position.y;
+    const mag   = Math.hypot(awayX, awayY) || 1;
+    const impulse = 0.008 * rikiInst.spinSpeed;
+    Matter.Body.applyForce(otherBody, otherBody.position, {
+      x: (awayX / mag) * impulse,
+      y: (awayY / mag) * impulse,
+    });
+    // Spin loss on the receiving top
+    otherInst.spinSpeed = Math.max(0, otherInst.spinSpeed - 0.025 * rikiInst.spinSpeed);
+  }
+}
+
+function _applyCollisionSpinLoss(instance, opponent, force, scale) {
+  const s         = scale !== undefined ? scale : 1.0;
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-  const loss      = force * 0.014 * impactMod * massMod * (1.1 - instance.def.stability);
+  const loss      = force * 0.032 * impactMod * massMod * (1.1 - instance.def.stability) * s;
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
-  // Side contact if hit hard enough relative to stability
-  if (force * impactMod > 0.08 && instance.def.stability < 0.7) {
+  if (force * impactMod > 0.06 && instance.def.stability < 0.7) {
     instance.sideContact = true;
   }
 }
