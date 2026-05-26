@@ -440,12 +440,12 @@ function _applyCollisionSpinLoss(instance, opponent, force, scale) {
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
   // Side contact only on very hard hits relative to stability
-  // High stability tops resist tipping -- needs a much harder hit to destabilize
-  const tipThreshold = 0.8 * instance.def.stability; // nomaru=0.48, riki=0.72, hajiki=0.28
+  const tipThreshold = 0.8 * instance.def.stability;
   if (force * impactMod > tipThreshold) {
-    // Add tilt proportional to how much the threshold was exceeded
     const excess = (force * impactMod - tipThreshold) / tipThreshold;
-    instance.tilt = Math.min(1.0, instance.tilt + excess * 0.3);
+    // Small tilt increment -- a single hit should nudge, not instantly topple
+    // Multiple hard hits accumulate to eventually destabilize
+    instance.tilt = Math.min(1.0, instance.tilt + excess * 0.04);
   }
 }
 
