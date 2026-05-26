@@ -192,6 +192,8 @@
       color: #4f4;
       white-space: pre;
       overflow-x: auto;
+      overflow-y: auto;
+      max-height: 220px;
       margin-top: 8px;
       display: none;
     }
@@ -482,17 +484,22 @@
 <script src="js/main.js"></script>
 
 <script>
-// ── Debug tuning vars (override Physics.PHYSICS at runtime) ──────────────────
+// ── Debug tuning vars -- initialized from Physics.BODY_PARAMS so they stay in sync ──
 
 const DEBUG = {
   launchSpeed:   7,
   launchVar:     2,
   launchSpread:  0.3,
-  restitution:   0.55,
-  friction:      0.02,
-  frictionAir:   0.002,
-  colLossMult:   0.032,
-  colSustain:    0.08,
+  get restitution()  { return Physics.BODY_PARAMS.restitution; },
+  set restitution(v) { Physics.BODY_PARAMS.restitution = v; },
+  get friction()     { return Physics.BODY_PARAMS.friction; },
+  set friction(v)    { Physics.BODY_PARAMS.friction = v; },
+  get frictionAir()  { return Physics.BODY_PARAMS.frictionAir; },
+  set frictionAir(v) { Physics.BODY_PARAMS.frictionAir = v; },
+  get colLossMult()  { return Physics.BODY_PARAMS.colLossMult; },
+  set colLossMult(v) { Physics.BODY_PARAMS.colLossMult = v; },
+  get colSustain()   { return Physics.BODY_PARAMS.colSustain; },
+  set colSustain(v)  { Physics.BODY_PARAMS.colSustain = v; },
 };
 
 // ── Slider definitions ────────────────────────────────────────────────────────
@@ -531,18 +538,8 @@ function getValue(key) {
 }
 
 function setValue(key, val) {
-  if (key.startsWith('debug:')) {
-    const k = key.slice(6);
-    DEBUG[k] = val;
-    // Mirror body params to Physics.BODY_PARAMS so they take effect on next launch
-    if (k === 'restitution') Physics.BODY_PARAMS.restitution = val;
-    if (k === 'friction')    Physics.BODY_PARAMS.friction    = val;
-    if (k === 'frictionAir') Physics.BODY_PARAMS.frictionAir = val;
-    if (k === 'colLossMult') Physics.BODY_PARAMS.colLossMult = val;
-    if (k === 'colSustain')  Physics.BODY_PARAMS.colSustain  = val;
-    return;
-  }
-  if (key.startsWith('tip:')) { TIP_FRICTION[key.slice(4)] = val; return; }
+  if (key.startsWith('debug:')) { DEBUG[key.slice(6)] = val; return; }
+  if (key.startsWith('tip:'))   { TIP_FRICTION[key.slice(4)] = val; return; }
   Physics.PHYSICS[key] = val;
 }
 
