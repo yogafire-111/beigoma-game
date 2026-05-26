@@ -362,7 +362,7 @@ function handlePlayerLaunchButton() {
   const result = Game.playerLaunch(aimAngle, spinSpeed);
   if (!result) return;
 
-  const speed  = 9 + Math.random() * 2;   // fast enough for real impact
+  const speed  = 5.5 + Math.random() * 1.5;   // fast enough for impact, bowl contains them
   const finalVx = Math.cos(result.angle) * speed;
   const finalVy = Math.sin(result.angle) * speed;
 

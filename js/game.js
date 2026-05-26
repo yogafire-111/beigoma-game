@@ -177,7 +177,7 @@ function _calculateCpuLaunch() {
   const launchY = cy + Math.sin(finalAngle + Math.PI) * (r * 0.72);
 
   // Velocity toward target
-  const speed = 9 + Math.random() * 2;
+  const speed = 5.5 + Math.random() * 1.5;
   const vx    = Math.cos(finalAngle) * speed;
   const vy    = Math.sin(finalAngle) * speed;
 

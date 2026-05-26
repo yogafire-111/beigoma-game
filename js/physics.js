@@ -11,15 +11,17 @@ const PHYSICS = {
 
   // Bowl
   BOWL_TENSION:     0.5,       // 0 = flat, 1 = steep funnel
-  BOWL_FORCE_MAX:   0.0018,    // max radial force at rim (tune for feel)
+  BOWL_FORCE_MAX:   0.0035,    // stronger bowl to contain fast tops
   BOWL_CENTER_DEAD: 0.08,      // fraction of radius where bowl is flat (no force)
+
+  // Out of bounds
+  EJECT_RADIUS:     1.08,      // fraction of ARENA_RADIUS before top is ejected
 
   // Spin
   SPIN_LAUNCH_MAX:  1.0,       // normalized spin at launch (1.0 = perfect throw)
-  SPIN_DECAY_BASE:  0.000195,  // spin lost per frame -- tuned so nomaru lasts ~40s at 60fps
   SPIN_DEAD_THRESH: 0.08,      // below this → top starts wobbling
   SPIN_FALL_THRESH: 0.03,      // below this → top falls and dies
-  SIDE_CONTACT_PENALTY: 0.0008,// extra spin loss per frame when sides rub canvas
+  SIDE_CONTACT_PENALTY: 0.006, // extra spin loss per frame when sides rub canvas (large -- body contact is devastating)
   WOBBLE_RATE:      0.012,     // how fast tilt increases once wobbling starts
 
   // Collision
@@ -80,36 +82,8 @@ function initPhysics(callbacks) {
 
 // Build circular arena wall from many small static segments
 function _buildArena() {
-  const cx    = PHYSICS.CANVAS_SIZE / 2;
-  const cy    = PHYSICS.CANVAS_SIZE / 2;
-  const r     = PHYSICS.ARENA_RADIUS;
-  const segs  = 48;
-  const walls = [];
-
-  for (let i = 0; i < segs; i++) {
-    const a1 = (Math.PI * 2 / segs) * i;
-    const a2 = (Math.PI * 2 / segs) * (i + 1);
-    const x1 = cx + Math.cos(a1) * r;
-    const y1 = cy + Math.sin(a1) * r;
-    const x2 = cx + Math.cos(a2) * r;
-    const y2 = cy + Math.sin(a2) * r;
-    const mx = (x1 + x2) / 2;
-    const my = (y1 + y2) / 2;
-    const len = Math.hypot(x2 - x1, y2 - y1);
-    const ang = Math.atan2(y2 - y1, x2 - x1);
-
-    const seg = Matter.Bodies.rectangle(mx, my, len + 2, 8, {
-      isStatic: true,
-      angle: ang,
-      friction: 0.3,
-      restitution: 0.55,
-      label: 'arena_wall',
-    });
-    walls.push(seg);
-  }
-
-  arenaBodies = walls;
-  Matter.World.add(world, walls);
+  // No physical wall -- bowl force contains tops naturally
+  arenaBodies = [];
 }
 
 // ─── Add / Remove Tops ───────────────────────────────────────────────────────
@@ -124,9 +98,9 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
 
   const body = Matter.Bodies.circle(x, y, def.radius, {
     mass:        def.mass * 2.5,
-    friction:    0.0,
-    frictionAir: 0.001,       // very low air friction -- tops glide freely
-    restitution: 0.75,        // cast iron is bouncy on impact
+    friction:    0.02,
+    frictionAir: 0.002,       // near zero -- air resistance is negligible
+    restitution: 0.55,
     label:       instance.defId,
   });
 
@@ -180,6 +154,29 @@ function updatePhysics(instances) {
     const dx   = body.position.x - cx;
     const dy   = body.position.y - cy;
     const dist = Math.hypot(dx, dy);
+
+    // ── Out of bounds check -- eject if past rim ──
+    if (dist > PHYSICS.ARENA_RADIUS * PHYSICS.EJECT_RADIUS && instance.alive) {
+      instance.alive    = false;
+      instance.ejected  = true;
+      if (onTopDied) onTopDied(instance);
+    }
+
+    // ── Dead top friction -- slow sliding quickly ──
+    if (!instance.alive) {
+      const vel    = body.velocity;
+      const speed  = Math.hypot(vel.x, vel.y);
+      if (speed > 0.05) {
+        Matter.Body.setVelocity(body, {
+          x: vel.x * 0.88,
+          y: vel.y * 0.88,
+        });
+      } else {
+        Matter.Body.setVelocity(body, { x: 0, y: 0 });
+      }
+      instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
+      continue;
+    }
 
     // ── Bowl force ──
     _applyBowlForce(body, dx, dy, dist);
@@ -273,35 +270,46 @@ function _checkSticking(body, pstate, dist, spinSpeed) {
 
 // ─── Spin Decay ──────────────────────────────────────────────────────────────
 
+// ─── Spin Decay ──────────────────────────────────────────────────────────────
+// Spin slows due to friction between tip and canvas surface.
+// Contact area of tip is the key variable -- fine point < round < flat line.
+// Heavier tops press harder on tip (more friction) but gyroscopic mass helps stability.
+
+const TIP_FRICTION = {
+  fine:  0.000120,   // Riki, Maru -- fine point, minimal contact area
+  round: 0.000195,   // Nōmaru -- round tip, moderate contact
+  flat:  0.000380,   // Hajiki -- flat line tip, maximum contact area
+};
+
 function _updateSpinDecay(instance, body, dist) {
   const def   = instance.def;
-  const speed = instance.spinSpeed;
 
-  // Base decay -- modified by alignment, mass, tip type
-  const alignmentFactor = 1.8 - instance.alignment;      // worse alignment = faster decay
-  const massFactor      = 1.1 - def.mass * 0.12;         // lighter tops decay slightly faster
-  const tipFactor       = def.tipType === 'flat' ? 1.25  // flat tip decays faster
-                        : def.tipType === 'fine' ? 0.88  // fine tip is efficient
-                        : 1.0;
+  // Base decay from tip-canvas friction
+  // Mass increases downward force on tip → more friction, but heavier tops
+  // also have more rotational inertia → net effect is roughly neutral on duration,
+  // which matches real beigoma (weight matters less than tip shape for spin duration)
+  const tipFriction  = TIP_FRICTION[def.tipType] || TIP_FRICTION.round;
+  const massPressure = 0.85 + def.mass * 0.18;  // heavier = slightly more friction
+  const alignFactor  = 1.9 - instance.alignment; // poor alignment = more wobble = more friction
 
-  let decay = PHYSICS.SPIN_DECAY_BASE * alignmentFactor * massFactor * tipFactor;
+  let decay = tipFriction * massPressure * alignFactor;
 
-  // Side contact penalty (when top is tilting)
+  // Side contact penalty -- when top is tilting, body contacts canvas
+  // This is much more aggressive than tip friction
   if (instance.tilt > 0.35 || instance.sideContact) {
-    decay += PHYSICS.SIDE_CONTACT_PENALTY;
+    decay += PHYSICS.SIDE_CONTACT_PENALTY * (1 + instance.tilt * 2);
     instance.sideContact = true;
   } else {
     instance.sideContact = false;
   }
 
-  instance.spinSpeed = Math.max(0, speed - decay);
+  instance.spinSpeed = Math.max(0, instance.spinSpeed - decay);
 
-  // Wobble: once below dead threshold, tilt increases
+  // Wobble onset: below dead threshold, tilt increases
   if (instance.spinSpeed < PHYSICS.SPIN_DEAD_THRESH) {
     instance.tilt = Math.min(1.0, instance.tilt + PHYSICS.WOBBLE_RATE);
   } else {
-    // Recover tilt slightly if spin picks up (e.g. after bowl centering)
-    instance.tilt = Math.max(0, instance.tilt - 0.005);
+    instance.tilt = Math.max(0, instance.tilt - 0.004);
   }
 }
 
