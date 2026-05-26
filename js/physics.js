@@ -123,10 +123,10 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
   const def = instance.def;
 
   const body = Matter.Bodies.circle(x, y, def.radius, {
-    mass:        def.mass * 2.5,   // scale up so forces feel right
-    friction:    0.01,
-    frictionAir: 0.008,
-    restitution: 0.45,
+    mass:        def.mass * 2.5,
+    friction:    0.0,
+    frictionAir: 0.001,       // very low air friction -- tops glide freely
+    restitution: 0.75,        // cast iron is bouncy on impact
     label:       instance.defId,
   });
 

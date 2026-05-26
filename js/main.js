@@ -60,6 +60,12 @@ let particles       = [];     // collision spark particles
 let cpuAnimProgress = 0;      // 0→1 during CPU launch animation
 let cpuAnimating    = false;
 
+// Impact effects state
+let shakeFrames     = 0;      // remaining screen shake frames
+let shakeMagnitude  = 0;      // current shake intensity
+let hitStopFrames   = 0;      // freeze frames on big impact
+let impactFlashes   = [];     // expanding ring flashes
+
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
 function spawnSparks(x, y, force) {
@@ -117,6 +123,74 @@ function drawParticles() {
     }
     ctx.restore();
   }
+}
+
+// ─── Impact Effects ──────────────────────────────────────────────────────────
+
+function triggerImpact(x, y, force) {
+  // Screen shake -- scaled to force
+  if (force > 0.3) {
+    shakeFrames    = Math.floor(4 + force * 10);
+    shakeMagnitude = Math.min(force * 14, 18);
+  }
+
+  // Hit-stop -- brief freeze on big hits
+  if (force > 0.6) {
+    hitStopFrames = Math.floor(force * 5);
+  }
+
+  // Expanding ring flash
+  impactFlashes.push({
+    x, y,
+    radius:  10,
+    maxR:    40 + force * 80,
+    life:    1.0,
+    decay:   0.07 + (1 - force) * 0.04,
+    color:   force > 0.7 ? '#FFFFFF' : '#FFD700',
+  });
+
+  // Second ring for heavy hits
+  if (force > 0.5) {
+    impactFlashes.push({
+      x, y,
+      radius:  5,
+      maxR:    20 + force * 40,
+      life:    1.0,
+      decay:   0.12,
+      color:   '#FF6600',
+    });
+  }
+}
+
+function updateImpactFlashes() {
+  for (let i = impactFlashes.length - 1; i >= 0; i--) {
+    const f  = impactFlashes[i];
+    f.radius = f.maxR * (1 - f.life);
+    f.life  -= f.decay;
+    if (f.life <= 0) impactFlashes.splice(i, 1);
+  }
+}
+
+function drawImpactFlashes() {
+  for (const f of impactFlashes) {
+    ctx.save();
+    ctx.globalAlpha  = f.life * 0.8;
+    ctx.strokeStyle  = f.color;
+    ctx.lineWidth    = 3 * f.life;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function applyScreenShake() {
+  if (shakeFrames <= 0) return;
+  const dx = (Math.random() - 0.5) * shakeMagnitude;
+  const dy = (Math.random() - 0.5) * shakeMagnitude;
+  ctx.translate(dx, dy);
+  shakeFrames--;
+  shakeMagnitude *= 0.82; // decay shake
 }
 
 // ─── Arena Rendering ─────────────────────────────────────────────────────────
@@ -279,20 +353,22 @@ function handlePlayerLaunchButton() {
   const gs = Game.getGameState();
   if (gs.phase !== 'player_launch') return;
 
-  const pos      = _playerLaunchPos();
-  const aimAngle = -Math.PI / 2;   // straight up toward center
-  const spinSpeed = 0.88;           // good strong spin
+  const pos       = _playerLaunchPos();
+  // Slight random angle variation so tops don't always meet perfectly head-on
+  const spread    = (Math.random() - 0.5) * 0.3;
+  const aimAngle  = -Math.PI / 2 + spread;
+  const spinSpeed = 0.88;
 
   const result = Game.playerLaunch(aimAngle, spinSpeed);
   if (!result) return;
 
-  const finalVx = Math.cos(result.angle) * 4.5;
-  const finalVy = Math.sin(result.angle) * 4.5;
+  const speed  = 9 + Math.random() * 2;   // fast enough for real impact
+  const finalVx = Math.cos(result.angle) * speed;
+  const finalVy = Math.sin(result.angle) * speed;
 
   const inst = gs.playerTop;
   Physics.addTopToWorld(inst, pos.x, pos.y, finalVx, finalVy, result.spin);
 
-  // Disable launch button
   const btn = document.getElementById('launch-btn');
   if (btn) btn.disabled = true;
 }
@@ -527,9 +603,11 @@ function gameLoop() {
   // Draw arena
   drawArena();
 
-  // Physics update
+  // Physics update -- skip frames during hit-stop
   const gs = Game.getGameState();
-  if (gs.phase === 'battle' || gs.phase === 'cpu_launch') {
+  if (hitStopFrames > 0) {
+    hitStopFrames--;
+  } else if (gs.phase === 'battle' || gs.phase === 'cpu_launch') {
     Physics.updatePhysics(liveInstances);
   }
 
@@ -564,12 +642,22 @@ function gameLoop() {
     }
   }
 
+  // Screen shake -- applied before drawing everything
+  ctx.save();
+  applyScreenShake();
+
   // Draw tops
   drawAllTops();
 
   // Draw particles
   updateParticles();
   drawParticles();
+
+  // Draw impact flash rings
+  updateImpactFlashes();
+  drawImpactFlashes();
+
+  ctx.restore(); // end screen shake transform
 
   // Draw aim indicator
   drawLaunchIndicator();
@@ -592,6 +680,10 @@ function initGame() {
   _cpuLaunchParams = null;
   input.dragging  = false;
   input.path      = [];
+  shakeFrames     = 0;
+  shakeMagnitude  = 0;
+  hitStopFrames   = 0;
+  impactFlashes   = [];
 
   // Reset launch button
   const launchBtn = document.getElementById('launch-btn');
@@ -603,20 +695,18 @@ function initGame() {
 
   // Show top selection UI (defined in index.html)
   if (typeof showTopSelection === 'function') {
-    showTopSelection((selectedTopId) => {
+    showTopSelection((playerTopId, cpuTopId) => {
       const { playerInstance, cpuInstance } = Game.startMatch(
-        selectedTopId,
-        Game.GAME.MODE_MATCH,
-        null   // random CPU personality
+        playerTopId,
+        cpuTopId,
+        Game.GAME.MODE_MATCH
       );
       liveInstances = [playerInstance, cpuInstance];
     });
   } else {
-    // Fallback: auto-start with nomaru for testing
+    // Fallback: auto-start with nomaru vs hajiki for testing
     const { playerInstance, cpuInstance } = Game.startMatch(
-      'nomaru',
-      Game.GAME.MODE_MATCH,
-      null
+      'nomaru', 'hajiki', Game.GAME.MODE_MATCH
     );
     liveInstances = [playerInstance, cpuInstance];
   }
@@ -630,9 +720,11 @@ Physics.initPhysics({
   },
   onCollision: (instA, instB, force) => {
     if (instA.body && instB.body) {
-      const mx = (instA.body.position.x + instB.body.position.x) / 2;
-      const my = (instA.body.position.y + instB.body.position.y) / 2;
-      spawnSparks(mx, my, Math.min(force / 12, 1.0));
+      const mx        = (instA.body.position.x + instB.body.position.x) / 2;
+      const my        = (instA.body.position.y + instB.body.position.y) / 2;
+      const normForce = Math.min(force / 10, 1.0);
+      spawnSparks(mx, my, normForce);
+      triggerImpact(mx, my, normForce);
     }
   },
 });

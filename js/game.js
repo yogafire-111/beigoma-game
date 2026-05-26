@@ -78,33 +78,26 @@ function _freshState() {
 
 // ─── Setup ───────────────────────────────────────────────────────────────────
 
-// Call at start of each match. playerTopId: 'nomaru'|'riki'|'maru'|'hajiki'
-function startMatch(playerTopId, mode, cpuPersonality) {
+// Call at start of each match.
+// playerTopId: 'nomaru'|'riki'|'maru'|'hajiki'
+// cpuTopId: same options -- player picks this directly
+function startMatch(playerTopId, cpuTopId, mode) {
   gameState = _freshState();
-  gameState.mode           = mode || GAME.MODE_MATCH;
-  gameState.cpuPersonality = cpuPersonality || _randomPersonality();
-  gameState.phase          = 'player_launch';
+  gameState.mode  = mode || GAME.MODE_MATCH;
+  gameState.phase = 'player_launch';
 
-  // Create instances
   const playerInst = Tops.createTopInstance(playerTopId, 'player');
-  const cpuTopId   = _pickCpuTop(playerTopId, gameState.cpuPersonality);
   const cpuInst    = Tops.createTopInstance(cpuTopId, 'cpu');
 
   gameState.playerInstance = playerInst;
   gameState.cpuInstance    = cpuInst;
 
-  // Register with physics
   Physics.registerInstance(playerInst);
   Physics.registerInstance(cpuInst);
 
-  // Set CPU launch timer
   gameState.cpuLaunchTimer = GAME.CPU_LAUNCH_DELAY;
 
-  return {
-    playerInstance: playerInst,
-    cpuInstance:    cpuInst,
-    cpuPersonality: gameState.cpuPersonality,
-  };
+  return { playerInstance: playerInst, cpuInstance: cpuInst };
 }
 
 // ─── Turn Logic ──────────────────────────────────────────────────────────────
@@ -184,7 +177,7 @@ function _calculateCpuLaunch() {
   const launchY = cy + Math.sin(finalAngle + Math.PI) * (r * 0.72);
 
   // Velocity toward target
-  const speed = 3.5 + Math.random() * 1.5;
+  const speed = 9 + Math.random() * 2;
   const vx    = Math.cos(finalAngle) * speed;
   const vy    = Math.sin(finalAngle) * speed;
 

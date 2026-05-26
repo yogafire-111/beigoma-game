@@ -24,8 +24,11 @@
 
       <!-- Top Selection (shown before launch) -->
       <section id="selection-section" class="panel-section">
-        <h2>こまを えらぶ</h2>
+        <h2>あなたのこま</h2>
         <div id="top-cards"></div>
+
+        <h2 style="margin-top:12px">あいてのこま</h2>
+        <div id="cpu-top-cards"></div>
 
         <!-- Three-view display canvas -->
         <div id="three-view-wrap">
@@ -51,17 +54,13 @@
           <div id="vs-label">VS</div>
 
           <div class="match-top-card" id="cpu-card">
-            <div class="match-top-label">CPU</div>
+            <div class="match-top-label">あいて</div>
             <canvas class="match-top-view" width="80" height="80"></canvas>
             <div class="match-top-name" id="cpu-top-name"></div>
             <div class="spin-bar-wrap">
               <div class="spin-bar" id="cpu-spin-bar"></div>
             </div>
           </div>
-        </div>
-
-        <div id="personality-display">
-          CPU: <span id="personality-label"></span>
         </div>
 
         <button id="launch-btn" class="btn-primary" style="margin-top:12px">
@@ -105,25 +104,28 @@
   <script>
     // ── Top Selection ──────────────────────────────────────────
 
-    let _selectedTopId   = null;
-    let _onSelectionDone = null;
+    let _selectedTopId    = null;
+    let _selectedCpuTopId = null;
+    let _onSelectionDone  = null;
 
     // Called by main.js initGame()
     function showTopSelection(callback) {
-      _onSelectionDone = callback;
-      _selectedTopId   = null;
+      _onSelectionDone  = callback;
+      _selectedTopId    = null;
+      _selectedCpuTopId = null;
 
       document.getElementById('selection-section').classList.remove('hidden');
       document.getElementById('match-section').classList.add('hidden');
       document.getElementById('confirm-btn').disabled = true;
 
-      _buildTopCards();
+      _buildTopCards('top-cards', false);
+      _buildTopCards('cpu-top-cards', true);
       _updateHistory();
       _updateStats();
     }
 
-    function _buildTopCards() {
-      const container = document.getElementById('top-cards');
+    function _buildTopCards(containerId, isCpu) {
+      const container = document.getElementById(containerId);
       container.innerHTML = '';
 
       Tops.TOP_ORDER.forEach(id => {
@@ -142,7 +144,7 @@
           </div>
         `;
 
-        card.addEventListener('click', () => _selectTop(id));
+        card.addEventListener('click', () => _selectTop(id, isCpu, containerId));
         container.appendChild(card);
       });
     }
@@ -158,33 +160,36 @@
         </div>`;
     }
 
-    function _selectTop(id) {
-      _selectedTopId = id;
+    function _selectTop(id, isCpu, containerId) {
+      if (isCpu) {
+        _selectedCpuTopId = id;
+      } else {
+        _selectedTopId = id;
+      }
 
-      // Highlight selected card
-      document.querySelectorAll('.top-card').forEach(c => {
+      // Highlight selected card in this container only
+      document.querySelectorAll(`#${containerId} .top-card`).forEach(c => {
         c.classList.toggle('selected', c.dataset.id === id);
       });
 
-      // Update three-view canvas
+      // Update three-view canvas with most recently selected top
       const canvas = document.getElementById('three-view-canvas');
       Tops.drawThreeView(canvas, id);
       document.getElementById('three-view-label').textContent = Tops.TOP_DEFS[id].hiragana;
 
-      document.getElementById('confirm-btn').disabled = false;
+      // Enable confirm only when both are selected
+      document.getElementById('confirm-btn').disabled =
+        !(_selectedTopId && _selectedCpuTopId);
     }
 
     document.getElementById('confirm-btn').addEventListener('click', () => {
-      if (!_selectedTopId) return;
+      if (!_selectedTopId || !_selectedCpuTopId) return;
 
-      // Hide selection, show match UI
       document.getElementById('selection-section').classList.add('hidden');
       document.getElementById('match-section').classList.remove('hidden');
 
-      // Trigger game start
-      if (_onSelectionDone) _onSelectionDone(_selectedTopId);
+      if (_onSelectionDone) _onSelectionDone(_selectedTopId, _selectedCpuTopId);
 
-      // Update match UI once game state is ready
       requestAnimationFrame(_updateMatchUI);
     });
 
@@ -209,15 +214,6 @@
       const cCanvas = document.querySelector('#cpu-card .match-top-view');
       Tops.drawThreeView(cCanvas, gs.cpuTop.defId);
       document.getElementById('cpu-top-name').textContent = gs.cpuTop.def.hiragana;
-
-      // Personality
-      const personalityMap = {
-        aggressive: 'こうげき',
-        defensive:  'ぼうぎょ',
-        standard:   'ふつう',
-      };
-      document.getElementById('personality-label').textContent =
-        personalityMap[gs.cpuPersonality] || gs.cpuPersonality;
 
       // Start spin bar update loop
       _updateSpinBars();
