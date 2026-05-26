@@ -221,6 +221,40 @@
     #debug::-webkit-scrollbar { width: 4px; }
     #debug::-webkit-scrollbar-track { background: #1a1a1a; }
     #debug::-webkit-scrollbar-thumb { background: #333; }
+
+    /* ── Live readout ── */
+    .readout-row {
+      display: grid;
+      grid-template-columns: 48px 1fr 1fr 1fr 1fr;
+      gap: 4px;
+      margin-bottom: 3px;
+      font-size: 10px;
+    }
+    .readout-header { color: #555; margin-bottom: 4px; }
+    .readout-label { color: #888; font-size: 10px; }
+    .readout-val   { color: #cf9; font-size: 10px; text-align: right; }
+
+    /* ── Event log ── */
+    #event-log {
+      max-height: 220px;
+      overflow-y: auto;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+    .log-entry {
+      padding: 2px 0;
+      border-bottom: 1px solid #1e1e1e;
+      display: grid;
+      grid-template-columns: 38px 1fr;
+      gap: 4px;
+    }
+    .log-time  { color: #555; }
+    .log-msg   { color: #aaa; }
+    .log-msg.launch     { color: #4df; }
+    .log-msg.collision  { color: #ff0; }
+    .log-msg.death      { color: #f64; }
+    .log-msg.result     { color: #4f4; }
+    .log-detail { color: #666; font-size: 9px; grid-column: 2; }
   </style>
 </head>
 <body>
@@ -235,8 +269,10 @@
   <div id="status">Select tops then press Launch</div>
 
   <!-- Top selection -->
-  <div id="selector-hint">PLAYER top (blue) / OPPONENT top (red)</div>
-  <div id="top-selector"></div>
+  <div style="font-size:11px;color:#4df;margin-bottom:4px">PLAYER</div>
+  <div id="top-selector-player" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap"></div>
+  <div style="font-size:11px;color:#f64;margin-bottom:4px">OPPONENT</div>
+  <div id="top-selector-cpu" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
 
   <!-- Spin display -->
   <div class="spin-display">
@@ -255,11 +291,46 @@
     <button class="btn primary" id="btn-launch">LAUNCH</button>
     <button class="btn" id="btn-reset">RESET</button>
     <button class="btn" id="btn-export">EXPORT VALUES</button>
+    <button class="btn" id="btn-copy-log">COPY LOG</button>
   </div>
 
   <div id="export-box"></div>
 
-  <!-- ── Sliders ── -->
+  <!-- ── Live readout ── -->
+  <div class="section">
+    <div class="section-title">LIVE STATE</div>
+    <div class="section-body" id="live-readout">
+      <div class="readout-row">
+        <span class="readout-label" style="color:#4df">PLAYER</span>
+        <span class="readout-val" id="r-p-pos">—</span>
+        <span class="readout-val" id="r-p-vel">—</span>
+        <span class="readout-val" id="r-p-spin">—</span>
+        <span class="readout-val" id="r-p-tilt">—</span>
+      </div>
+      <div class="readout-row readout-header">
+        <span class="readout-label"></span>
+        <span class="readout-val">pos(x,y)</span>
+        <span class="readout-val">vel</span>
+        <span class="readout-val">spin</span>
+        <span class="readout-val">tilt</span>
+      </div>
+      <div class="readout-row">
+        <span class="readout-label" style="color:#f64">OPPO</span>
+        <span class="readout-val" id="r-c-pos">—</span>
+        <span class="readout-val" id="r-c-vel">—</span>
+        <span class="readout-val" id="r-c-spin">—</span>
+        <span class="readout-val" id="r-c-tilt">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Event log ── -->
+  <div class="section">
+    <div class="section-title">EVENT LOG <span id="log-count" style="color:#666;font-size:10px"></span></div>
+    <div class="section-body">
+      <div id="event-log"></div>
+    </div>
+  </div>-->
 
   <div class="section">
     <div class="section-title">BOWL</div>
@@ -460,8 +531,18 @@ function getValue(key) {
 }
 
 function setValue(key, val) {
-  if (key.startsWith('debug:'))     { DEBUG[key.slice(6)] = val; return; }
-  if (key.startsWith('tip:'))       { TIP_FRICTION[key.slice(4)] = val; return; }
+  if (key.startsWith('debug:')) {
+    const k = key.slice(6);
+    DEBUG[k] = val;
+    // Mirror body params to Physics.BODY_PARAMS so they take effect on next launch
+    if (k === 'restitution') Physics.BODY_PARAMS.restitution = val;
+    if (k === 'friction')    Physics.BODY_PARAMS.friction    = val;
+    if (k === 'frictionAir') Physics.BODY_PARAMS.frictionAir = val;
+    if (k === 'colLossMult') Physics.BODY_PARAMS.colLossMult = val;
+    if (k === 'colSustain')  Physics.BODY_PARAMS.colSustain  = val;
+    return;
+  }
+  if (key.startsWith('tip:')) { TIP_FRICTION[key.slice(4)] = val; return; }
   Physics.PHYSICS[key] = val;
 }
 
@@ -510,7 +591,13 @@ let _cpuTop    = 'hajiki';
 let _selecting = 'player'; // 'player' or 'cpu'
 
 function buildTopSelector() {
-  const wrap = document.getElementById('top-selector');
+  _buildGrid('top-selector-player', false);
+  _buildGrid('top-selector-cpu', true);
+}
+
+function _buildGrid(containerId, isCpu) {
+  const wrap = document.getElementById(containerId);
+  if (!wrap) return;
   wrap.innerHTML = '';
   Tops.TOP_ORDER.forEach(id => {
     const def = Tops.TOP_DEFS[id];
@@ -519,35 +606,25 @@ function buildTopSelector() {
     btn.textContent = def.hiragana;
     btn.dataset.id  = id;
     btn.addEventListener('click', () => {
-      if (_selecting === 'player') {
-        _playerTop = id;
-      } else {
-        _cpuTop = id;
-      }
+      if (isCpu) { _cpuTop = id; }
+      else       { _playerTop = id; }
       updateTopBtnStates();
     });
     wrap.appendChild(btn);
   });
-
-  // Toggle player/cpu selecting
-  const hint = document.getElementById('selector-hint');
-  hint.style.cursor = 'pointer';
-  hint.addEventListener('click', () => {
-    _selecting = _selecting === 'player' ? 'cpu' : 'player';
-    hint.textContent = _selecting === 'player'
-      ? 'PLAYER top (blue) / click to switch to OPPONENT'
-      : 'OPPONENT top (red) / click to switch to PLAYER';
-    updateTopBtnStates();
-  });
-
   updateTopBtnStates();
 }
 
 function updateTopBtnStates() {
-  document.querySelectorAll('.top-btn').forEach(btn => {
-    btn.classList.remove('active-player', 'active-cpu');
+  // Player grid
+  document.querySelectorAll('#top-selector-player .top-btn').forEach(btn => {
+    btn.classList.remove('active-player');
     if (btn.dataset.id === _playerTop) btn.classList.add('active-player');
-    if (btn.dataset.id === _cpuTop)    btn.classList.add('active-cpu');
+  });
+  // CPU grid
+  document.querySelectorAll('#top-selector-cpu .top-btn').forEach(btn => {
+    btn.classList.remove('active-cpu');
+    if (btn.dataset.id === _cpuTop) btn.classList.add('active-cpu');
   });
 }
 
@@ -557,14 +634,21 @@ function handlePlayerLaunchButton() {
   const gs = Game.getGameState();
   if (gs.phase !== 'player_launch') return;
 
-  const pos       = { x: 400, y: 400 + 340 * 0.78 };
-  const spread    = (Math.random() - 0.5) * DEBUG.launchSpread;
-  const aimAngle  = -Math.PI / 2 + spread;
+  // Launch from bottom, offset sideways so tops don't meet head-on
+  // Lateral offset creates the tangential velocity needed for spiral motion
+  const lateralOffset = (Math.random() - 0.5) * PHYSICS.ARENA_RADIUS * 0.6;
+  const pos = {
+    x: 400 + lateralOffset,
+    y: 400 + 340 * 0.78
+  };
+
+  const spread   = (Math.random() - 0.5) * DEBUG.launchSpread;
+  const aimAngle = -Math.PI / 2 + spread;
 
   const result = Game.playerLaunch(aimAngle, 0.88);
   if (!result) return;
 
-  const speed  = DEBUG.launchSpeed + Math.random() * DEBUG.launchVar;
+  const speed = DEBUG.launchSpeed + Math.random() * DEBUG.launchVar;
   Physics.addTopToWorld(
     gs.playerTop,
     pos.x, pos.y,
@@ -657,7 +741,13 @@ document.getElementById('btn-export').addEventListener('click', () => {
 // ── Reset ─────────────────────────────────────────────────────────────────────
 
 document.getElementById('btn-reset').addEventListener('click', () => {
+  // Log result before resetting
+  const gs = Game.getGameState();
+  if (gs.result) {
+    logEvent('result', gs.result.replace('_', ' '), `reason:${gs.resultReason}`);
+  }
   initGame();
+  clearLog();
   setStatus('Reset. Select tops and launch.', '');
   document.getElementById('export-box').style.display = 'none';
 });
@@ -666,12 +756,154 @@ document.getElementById('btn-launch').addEventListener('click', () => {
   handlePlayerLaunchButton();
 });
 
+// ── Event log ─────────────────────────────────────────────────────────────────
+
+const eventLog = [];
+let matchStartTime = null;
+
+function logEvent(type, msg, detail) {
+  const t    = matchStartTime ? ((Date.now() - matchStartTime) / 1000).toFixed(2) : '0.00';
+  const entry = { t, type, msg, detail: detail || '' };
+  eventLog.push(entry);
+
+  const logEl = document.getElementById('event-log');
+  if (!logEl) return;
+
+  const row = document.createElement('div');
+  row.className = 'log-entry';
+  row.innerHTML = `
+    <span class="log-time">${t}s</span>
+    <span class="log-msg ${type}">${msg}</span>
+    ${detail ? `<span class="log-detail">${detail}</span>` : ''}
+  `;
+  logEl.insertBefore(row, logEl.firstChild); // newest first
+
+  const countEl = document.getElementById('log-count');
+  if (countEl) countEl.textContent = `(${eventLog.length})`;
+}
+
+function clearLog() {
+  eventLog.length = 0;
+  const logEl = document.getElementById('event-log');
+  if (logEl) logEl.innerHTML = '';
+  const countEl = document.getElementById('log-count');
+  if (countEl) countEl.textContent = '';
+  matchStartTime = Date.now();
+}
+
+function formatLog() {
+  const lines = ['=== BEIGOMA DEBUG LOG ==='];
+  lines.push(`Settings: bowlForce=${Physics.PHYSICS.BOWL_FORCE_MAX} damp=${Physics.PHYSICS.BOWL_DAMPING} speed=${DEBUG.launchSpeed} colLoss=${DEBUG.colLossMult} restitution=${DEBUG.restitution}`);
+  lines.push(`Tips: fine=${TIP_FRICTION.fine} round=${TIP_FRICTION.round} flat=${TIP_FRICTION.flat}`);
+  lines.push('---');
+  eventLog.forEach(e => {
+    lines.push(`[${e.t}s] ${e.type.toUpperCase()} ${e.msg} ${e.detail}`);
+  });
+  return lines.join('\n');
+}
+
+document.getElementById('btn-copy-log').addEventListener('click', () => {
+  const text = formatLog();
+  navigator.clipboard.writeText(text).then(() => {
+    setStatus('Log copied to clipboard', 'ok');
+  }).catch(() => {
+    // Fallback: show in export box
+    const box = document.getElementById('export-box');
+    box.style.display = 'block';
+    box.textContent   = text;
+    setStatus('Log shown below (copy manually)', '');
+  });
+});
+
+// ── Live state readout ────────────────────────────────────────────────────────
+
+function updateLiveReadout() {
+  const gs = Game.getGameState();
+  _updateTopReadout(gs.playerTop, 'r-p-pos', 'r-p-vel', 'r-p-spin', 'r-p-tilt');
+  _updateTopReadout(gs.cpuTop,    'r-c-pos', 'r-c-vel', 'r-c-spin', 'r-c-tilt');
+  requestAnimationFrame(updateLiveReadout);
+}
+
+function _updateTopReadout(inst, posId, velId, spinId, tiltId) {
+  const pos  = document.getElementById(posId);
+  const vel  = document.getElementById(velId);
+  const spin = document.getElementById(spinId);
+  const tilt = document.getElementById(tiltId);
+  if (!inst || !inst.body) {
+    if (pos) pos.textContent = '—';
+    return;
+  }
+  const b = inst.body;
+  const cx = Physics.PHYSICS.CANVAS_SIZE / 2;
+  const cy = Physics.PHYSICS.CANVAS_SIZE / 2;
+  const dx = b.position.x - cx;
+  const dy = b.position.y - cy;
+  const dist = Math.hypot(dx, dy);
+  const speed = Math.hypot(b.velocity.x, b.velocity.y);
+
+  if (pos)  pos.textContent  = `${dist.toFixed(0)}px`;
+  if (vel)  vel.textContent  = speed.toFixed(2);
+  if (spin) spin.textContent = (inst.spinSpeed || 0).toFixed(3);
+  if (tilt) tilt.textContent = (inst.tilt || 0).toFixed(2);
+}
+
+// ── Hook into Physics callbacks for logging ───────────────────────────────────
+// Override the Physics init callbacks after game loads
+
+function installLogHooks() {
+  // Wrap the existing onCollision
+  const origInit = Physics.initPhysics.bind(Physics);
+  Physics.initPhysics({
+    onTopDied: (instance) => {
+      const cause = instance.ejected ? 'EJECTED'
+                  : instance.sideContact ? 'side-contact'
+                  : 'spin-decay';
+      logEvent('death',
+        `${instance.owner} (${instance.def.hiragana}) died`,
+        `cause:${cause} finalSpin:${(instance.spinSpeed||0).toFixed(4)}`
+      );
+    },
+    onCollision: (instA, instB, force) => {
+      // Spawn sparks (same as main.js)
+      if (instA.body && instB.body) {
+        const mx = (instA.body.position.x + instB.body.position.x) / 2;
+        const my = (instA.body.position.y + instB.body.position.y) / 2;
+        const normForce = Math.min(force / 10, 1.0);
+        spawnSparks(mx, my, normForce);
+        triggerImpact(mx, my, normForce);
+      }
+      // Log collision
+      const spinA = (instA.spinSpeed || 0).toFixed(3);
+      const spinB = (instB.spinSpeed || 0).toFixed(3);
+      const velA  = instA.body ? Math.hypot(instA.body.velocity.x, instA.body.velocity.y).toFixed(2) : '?';
+      const velB  = instB.body ? Math.hypot(instB.body.velocity.x, instB.body.velocity.y).toFixed(2) : '?';
+      logEvent('collision',
+        `${instA.def.hiragana} ✕ ${instB.def.hiragana}`,
+        `force:${force.toFixed(2)} spins:${spinA}/${spinB} vels:${velA}/${velB}`
+      );
+    },
+  });
+}
+
+// ── Patch handlePlayerLaunchButton to log launch ──────────────────────────────
+
+const _origLaunch = handlePlayerLaunchButton;
+handlePlayerLaunchButton = function() {
+  clearLog();
+  logEvent('launch', `Player: ${_playerTop} vs CPU: ${_cpuTop}`,
+    `speed:${DEBUG.launchSpeed} bowlF:${Physics.PHYSICS.BOWL_FORCE_MAX} damp:${Physics.PHYSICS.BOWL_DAMPING}`
+  );
+  _origLaunch();
+};
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 window.addEventListener('load', () => {
   initSliders();
   buildTopSelector();
   updateDebugSpinBars();
+  updateLiveReadout();
+  installLogHooks();
   setStatus('Ready. Select tops and launch.', '');
 });
 </script>

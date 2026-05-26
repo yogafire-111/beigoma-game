@@ -11,8 +11,8 @@ const PHYSICS = {
 
   // Bowl
   BOWL_TENSION:     0.5,       // 0 = flat, 1 = steep funnel
-  BOWL_FORCE_MAX:   0.0012,    // gentle inward pull
-  BOWL_DAMPING:     0.0018,    // velocity damping -- creates spiral, kills pendulum
+  BOWL_FORCE_MAX:   0.0022,    // inward pull strength
+  BOWL_DAMPING:     0.008,     // radial-only damping -- low enough to preserve spiral
   BOWL_CENTER_DEAD: 0.08,      // fraction of radius where bowl is flat
 
   // Out of bounds
@@ -94,14 +94,23 @@ function _buildArena() {
 // x, y: launch position (canvas coords)
 // vx, vy: initial velocity
 // spinSpeed: 0–1 normalized
+// Body params -- can be overridden by debug.html at runtime
+const BODY_PARAMS = {
+  friction:    0.0,
+  frictionAir: 0.0005,  // very low -- lateral velocity must survive to the center
+  restitution: 0.55,
+  colLossMult: 0.032,
+  colSustain:  0.08,
+};
+
 function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
   const def = instance.def;
 
   const body = Matter.Bodies.circle(x, y, def.radius, {
     mass:        def.mass * 2.5,
-    friction:    0.02,
-    frictionAir: 0.002,       // near zero -- air resistance is negligible
-    restitution: 0.55,
+    friction:    BODY_PARAMS.friction,
+    frictionAir: BODY_PARAMS.frictionAir,
+    restitution: BODY_PARAMS.restitution,
     label:       instance.defId,
   });
 
@@ -225,24 +234,24 @@ function _applyBowlForce(body, dx, dy, dist) {
   const tension = PHYSICS.BOWL_TENSION;
   const slope   = Math.pow(t, 1.5 + tension);
 
-  // Inward pull -- gentle, just enough to spiral toward center
+  // Inward pull
   const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
-  const fx = -(dx / dist) * forceMag;
-  const fy = -(dy / dist) * forceMag;
-  Matter.Body.applyForce(body, body.position, { x: fx, y: fy });
+  const nx = dx / dist;  // unit vector outward from center
+  const ny = dy / dist;
+  Matter.Body.applyForce(body, body.position, {
+    x: -nx * forceMag,
+    y: -ny * forceMag,
+  });
 
-  // Velocity damping -- kills the pendulum oscillation.
-  // Simulates canvas friction on the tip as the top moves laterally.
-  // This is what creates the spiral-inward behavior instead of swinging.
+  // Directional damping -- only damp the RADIAL component of velocity.
+  // This preserves tangential (orbital) velocity, creating the spiral inward.
+  // Damping the full velocity vector killed the spiral entirely.
   const vel    = body.velocity;
-  const speed  = Math.hypot(vel.x, vel.y);
-  if (speed > 0.01) {
-    const damp = PHYSICS.BOWL_DAMPING * body.mass;
-    Matter.Body.applyForce(body, body.position, {
-      x: -(vel.x / speed) * damp * speed,
-      y: -(vel.y / speed) * damp * speed,
-    });
-  }
+  const radialV = vel.x * nx + vel.y * ny;  // dot product = radial speed
+  Matter.Body.applyForce(body, body.position, {
+    x: -nx * radialV * PHYSICS.BOWL_DAMPING * body.mass,
+    y: -ny * radialV * PHYSICS.BOWL_DAMPING * body.mass,
+  });
 }
 
 // ─── Hajiki Drift ────────────────────────────────────────────────────────────
@@ -296,11 +305,12 @@ function _updateSpinDecay(instance, body, dist) {
 
   let decay = tipFriction * massPressure * alignFactor;
 
-  // Side contact penalty -- when top is tilting, body contacts canvas
-  // This is much more aggressive than tip friction
-  if (instance.tilt > 0.35 || instance.sideContact) {
-    decay += PHYSICS.SIDE_CONTACT_PENALTY * (1 + instance.tilt * 2);
-    instance.sideContact = true;
+  // Side contact penalty -- only kicks in at significant tilt
+  // Below 0.6 tilt, top is still mostly upright -- no body contact
+  if (instance.tilt > 0.6 || instance.sideContact) {
+    const tiltFactor = Math.max(0, instance.tilt - 0.6) / 0.4; // 0 at tilt=0.6, 1 at tilt=1.0
+    decay += PHYSICS.SIDE_CONTACT_PENALTY * tiltFactor * 3;
+    instance.sideContact = instance.tilt > 0.75; // only lock in sideContact at severe tilt
   } else {
     instance.sideContact = false;
   }
@@ -391,8 +401,8 @@ function _handleCollisionPairs(pairs, isInitial) {
       // Sustained grinding contact -- smaller per-frame loss
       // Only significant if they're actually rubbing (low relative velocity)
       if (force < 1.5) {
-        _applyCollisionSpinLoss(instA, instB, 0.4, 0.08);
-        _applyCollisionSpinLoss(instB, instA, 0.4, 0.08);
+        _applyCollisionSpinLoss(instA, instB, 0.4, BODY_PARAMS.colSustain);
+        _applyCollisionSpinLoss(instB, instA, 0.4, BODY_PARAMS.colSustain);
       }
     }
   }
@@ -426,11 +436,16 @@ function _applyCollisionSpinLoss(instance, opponent, force, scale) {
   const s         = scale !== undefined ? scale : 1.0;
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-  const loss      = force * 0.032 * impactMod * massMod * (1.1 - instance.def.stability) * s;
+  const loss      = force * BODY_PARAMS.colLossMult * impactMod * massMod * (1.1 - instance.def.stability) * s;
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
-  if (force * impactMod > 0.06 && instance.def.stability < 0.7) {
-    instance.sideContact = true;
+  // Side contact only on very hard hits relative to stability
+  // High stability tops resist tipping -- needs a much harder hit to destabilize
+  const tipThreshold = 0.8 * instance.def.stability; // nomaru=0.48, riki=0.72, hajiki=0.28
+  if (force * impactMod > tipThreshold) {
+    // Add tilt proportional to how much the threshold was exceeded
+    const excess = (force * impactMod - tipThreshold) / tipThreshold;
+    instance.tilt = Math.min(1.0, instance.tilt + excess * 0.3);
   }
 }
 
@@ -512,6 +527,7 @@ function resetPhysics() {
 if (typeof window !== 'undefined') {
   window.Physics = {
     PHYSICS,
+    BODY_PARAMS,
     initPhysics,
     addTopToWorld,
     removeTopFromWorld,
