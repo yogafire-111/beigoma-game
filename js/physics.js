@@ -96,11 +96,11 @@ function _buildArena() {
 // spinSpeed: 0–1 normalized
 // Body params -- can be overridden by debug.html at runtime
 const BODY_PARAMS = {
-  friction:    0.0,
-  frictionAir: 0.0005,
-  restitution: 0.85,   // cast iron is bouncy -- increase for visible knockback
-  colLossMult: 0.08,   // increased for meaningful collision damage
-  colSustain:  0.08,
+  friction:    0.03,
+  frictionAir: 0.001,
+  restitution: 0.35,   // lower -- canvas absorbs more energy than billiard table
+  colLossMult: 0.08,
+  colSustain:  0.06,
 };
 
 function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
@@ -436,43 +436,52 @@ function _applyCollisionSpinLoss(instance, opponent, force, scale) {
   const s         = scale !== undefined ? scale : 1.0;
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-  const loss      = force * BODY_PARAMS.colLossMult * impactMod * massMod * (1.1 - instance.def.stability) * s;
+
+  // Deflection reduces damage taken -- Maru's smooth deflect absorbs less impact
+  // deflection stat: higher = more energy redirected away = less spin loss
+  const deflectAbsorb = 1.0 - (instance.def.deflection * 0.5);
+
+  const loss = force * BODY_PARAMS.colLossMult * impactMod * massMod
+             * (1.1 - instance.def.stability) * deflectAbsorb * s;
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
-  // Side contact only on very hard hits relative to stability
+  // Tilt from hard hits -- scaled by stability
   const tipThreshold = 0.8 * instance.def.stability;
   if (force * impactMod > tipThreshold) {
     const excess = (force * impactMod - tipThreshold) / tipThreshold;
-    // Small tilt increment -- a single hit should nudge, not instantly topple
-    // Multiple hard hits accumulate to eventually destabilize
     instance.tilt = Math.min(1.0, instance.tilt + excess * 0.04);
   }
 }
 
 function _applyDeflection(instance, ownBody, otherBody, force) {
   const deflection = instance.def.deflection;
-  let   dvx = ownBody.velocity.x;
-  let   dvy = ownBody.velocity.y;
+  const dvx = ownBody.velocity.x;
+  const dvy = ownBody.velocity.y;
 
   if (instance.defId === 'maru') {
-    // Smooth deflect: redirect cleanly away from opponent
+    // Smooth deflect: redirect cleanly away, preserving most speed
+    // Round profile means glancing contact -- energy redirected not absorbed
     const awayX = ownBody.position.x - otherBody.position.x;
     const awayY = ownBody.position.y - otherBody.position.y;
     const mag   = Math.hypot(awayX, awayY) || 1;
     const spd   = Math.hypot(dvx, dvy);
-    dvx = (awayX / mag) * spd * deflection;
-    dvy = (awayY / mag) * spd * deflection;
-    Matter.Body.setVelocity(ownBody, { x: dvx, y: dvy });
+    // Preserve 85% of speed, redirect away -- slippery
+    Matter.Body.setVelocity(ownBody, {
+      x: (awayX / mag) * spd * 0.85,
+      y: (awayY / mag) * spd * 0.85,
+    });
 
   } else if (instance.defId === 'hajiki') {
-    // Erratic deflect: add random component
+    // Erratic deflect: random direction, loses some speed unpredictably
     const randAngle = Math.random() * Math.PI * 2;
     const spd       = Math.hypot(dvx, dvy);
-    dvx = dvx * 0.6 + Math.cos(randAngle) * spd * deflection * 0.7;
-    dvy = dvy * 0.6 + Math.sin(randAngle) * spd * deflection * 0.7;
-    Matter.Body.setVelocity(ownBody, { x: dvx, y: dvy });
+    const keep      = 0.5 + Math.random() * 0.3; // 50-80% speed retained
+    Matter.Body.setVelocity(ownBody, {
+      x: Math.cos(randAngle) * spd * keep,
+      y: Math.sin(randAngle) * spd * keep,
+    });
   }
-  // nomaru / riki: standard Matter.js collision response, no override needed
+  // nomaru / riki: standard Matter.js response
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
