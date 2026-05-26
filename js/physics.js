@@ -97,9 +97,9 @@ function _buildArena() {
 // Body params -- can be overridden by debug.html at runtime
 const BODY_PARAMS = {
   friction:    0.0,
-  frictionAir: 0.0005,  // very low -- lateral velocity must survive to the center
-  restitution: 0.55,
-  colLossMult: 0.032,
+  frictionAir: 0.0005,
+  restitution: 0.85,   // cast iron is bouncy -- increase for visible knockback
+  colLossMult: 0.08,   // increased for meaningful collision damage
   colSustain:  0.08,
 };
 
@@ -169,13 +169,12 @@ function updatePhysics(instances) {
     if (dist > PHYSICS.ARENA_RADIUS * PHYSICS.EJECT_RADIUS && instance.alive) {
       instance.alive    = false;
       instance.ejected  = true;
+      Matter.Body.setStatic(body, true);  // freeze in place
       if (onTopDied) onTopDied(instance);
     }
 
-    // ── Dead top -- stop immediately, fade out ──
+    // ── Dead top -- static, just fade out ──
     if (!instance.alive) {
-      Matter.Body.setVelocity(body, { x: 0, y: 0 });
-      Matter.Body.setAngularVelocity(body, 0);
       instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
       continue;
     }
@@ -212,6 +211,7 @@ function updatePhysics(instances) {
     // ── Death check ──
     if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
       instance.alive = false;
+      if (body) Matter.Body.setStatic(body, true);
       if (onTopDied) onTopDied(instance);
     }
 
