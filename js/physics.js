@@ -16,11 +16,11 @@ const PHYSICS = {
 
   // Spin
   SPIN_LAUNCH_MAX:  1.0,       // normalized spin at launch (1.0 = perfect throw)
-  SPIN_DECAY_BASE:  0.00055,   // spin lost per frame under normal conditions
+  SPIN_DECAY_BASE:  0.000195,  // spin lost per frame -- tuned so nomaru lasts ~40s at 60fps
   SPIN_DEAD_THRESH: 0.08,      // below this → top starts wobbling
   SPIN_FALL_THRESH: 0.03,      // below this → top falls and dies
-  SIDE_CONTACT_PENALTY: 0.004, // extra spin loss per frame when sides rub canvas
-  WOBBLE_RATE:      0.04,      // how fast tilt increases once wobbling starts
+  SIDE_CONTACT_PENALTY: 0.0008,// extra spin loss per frame when sides rub canvas
+  WOBBLE_RATE:      0.012,     // how fast tilt increases once wobbling starts
 
   // Collision
   JUMP_CHANCE:      0.06,      // probability of jump on high-force impact (0–1)
@@ -373,7 +373,7 @@ function _applyCollisionSpinLoss(instance, opponent, force) {
   // Heavier, higher-impact opponents cause more spin loss
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-  const loss      = force * 0.022 * impactMod * massMod * (1.1 - instance.def.stability);
+  const loss      = force * 0.006 * impactMod * massMod * (1.1 - instance.def.stability);
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
   // Side contact if hit hard enough relative to stability

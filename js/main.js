@@ -254,132 +254,30 @@ function drawLaunchIndicator() {
 
 // ─── Mouse Input ─────────────────────────────────────────────────────────────
 
-canvas.addEventListener('mousedown', (e) => {
+// ─── Launch Logic (Button-based, v0.1) ──────────────────────────────────────
+// Drag mechanic deferred -- tops launch automatically with good default params.
+// Player just presses the Launch button in the UI panel.
+
+function handlePlayerLaunchButton() {
   const gs = Game.getGameState();
   if (gs.phase !== 'player_launch') return;
 
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = SIZE / rect.width;
-  const scaleY = SIZE / rect.height;
-  input.dragging  = true;
-  input.startX    = (e.clientX - rect.left) * scaleX;
-  input.startY    = (e.clientY - rect.top)  * scaleY;
-  input.currentX  = input.startX;
-  input.currentY  = input.startY;
-  input.path      = [{ x: input.startX, y: input.startY }];
-});
+  const pos      = _playerLaunchPos();
+  const aimAngle = -Math.PI / 2;   // straight up toward center
+  const spinSpeed = 0.88;           // good strong spin
 
-canvas.addEventListener('mousemove', (e) => {
-  if (!input.dragging) return;
-  const rect   = canvas.getBoundingClientRect();
-  const scaleX = SIZE / rect.width;
-  const scaleY = SIZE / rect.height;
-  input.currentX = (e.clientX - rect.left) * scaleX;
-  input.currentY = (e.clientY - rect.top)  * scaleY;
-  input.path.push({ x: input.currentX, y: input.currentY });
-  if (input.path.length > LAUNCH.PATH_HISTORY) {
-    input.path.shift();
-  }
-});
-
-canvas.addEventListener('mouseup', (e) => {
-  if (!input.dragging) return;
-  input.dragging = false;
-
-  const rect   = canvas.getBoundingClientRect();
-  const scaleX = SIZE / rect.width;
-  const scaleY = SIZE / rect.height;
-  const upX    = (e.clientX - rect.left) * scaleX;
-  const upY    = (e.clientY - rect.top)  * scaleY;
-
-  // Velocity from last two path points
-  const path = input.path;
-  if (path.length >= 2) {
-    const last = path[path.length - 1];
-    const prev = path[path.length - 2];
-    input.releaseVelX = last.x - prev.x;
-    input.releaseVelY = last.y - prev.y;
-  } else {
-    input.releaseVelX = 0;
-    input.releaseVelY = 0;
-  }
-
-  _handlePlayerLaunch();
-});
-
-// Touch support (for later tablet use)
-canvas.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  const touch = e.touches[0];
-  canvas.dispatchEvent(new MouseEvent('mousedown', {
-    clientX: touch.clientX, clientY: touch.clientY
-  }));
-}, { passive: false });
-
-canvas.addEventListener('touchmove', (e) => {
-  e.preventDefault();
-  const touch = e.touches[0];
-  canvas.dispatchEvent(new MouseEvent('mousemove', {
-    clientX: touch.clientX, clientY: touch.clientY
-  }));
-}, { passive: false });
-
-canvas.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  const touch = e.changedTouches[0];
-  canvas.dispatchEvent(new MouseEvent('mouseup', {
-    clientX: touch.clientX, clientY: touch.clientY
-  }));
-}, { passive: false });
-
-// ─── Launch Logic ────────────────────────────────────────────────────────────
-
-function _handlePlayerLaunch() {
-  const velX  = input.releaseVelX;
-  const velY  = input.releaseVelY;
-  const speed = Math.hypot(velX, velY);
-  const curve = _measureCurvature();
-  const pos   = _playerLaunchPos();
-
-  // Aim direction: from launch pos toward where player dragged
-  const aimAngle = Math.atan2(
-    input.currentY - pos.y,
-    input.currentX - pos.x
-  );
-
-  // Map speed to spin (skewed toward upper end)
-  const spinSpeed = _mapVelocityToSpin(speed);
-
-  // Determine launch outcome
-  const outcome = _classifyLaunch(speed, curve);
-
-  // Apply player skill error
   const result = Game.playerLaunch(aimAngle, spinSpeed);
   if (!result) return;
 
-  if (outcome === 'miss' || result.missed) {
-    _showMissEffect(pos);
-    return;
-  }
+  const finalVx = Math.cos(result.angle) * 4.5;
+  const finalVy = Math.sin(result.angle) * 4.5;
 
-  // Compute launch velocity
-  const finalVx = Math.cos(result.angle) * (3 + spinSpeed * 5);
-  const finalVy = Math.sin(result.angle) * (3 + spinSpeed * 5);
-
-  const inst = Game.getGameState().playerTop;
+  const inst = gs.playerTop;
   Physics.addTopToWorld(inst, pos.x, pos.y, finalVx, finalVy, result.spin);
 
-  // Apply tilt penalty from curve
-  if (outcome === 'steep') {
-    inst.sideContact = true;
-    inst.spinSpeed  *= 0.55;
-  } else if (outcome === 'tilt') {
-    inst.sideContact = true;
-    inst.spinSpeed  *= 0.82;
-  }
-
-  // Reset path
-  input.path = [];
+  // Disable launch button
+  const btn = document.getElementById('launch-btn');
+  if (btn) btn.disabled = true;
 }
 
 function _mapVelocityToSpin(speed) {
@@ -498,7 +396,7 @@ function drawHUD() {
 
   let prompt = '';
   if (gs.phase === 'player_launch') {
-    prompt = input.dragging ? 'リリース → スピン！' : 'クリック＆ドラッグ で投げる';
+    prompt = '「なげる」ボタンをおす';
   } else if (gs.phase === 'cpu_launch') {
     prompt = 'CPU 投げ中...';
   } else if (gs.phase === 'battle') {
@@ -572,15 +470,19 @@ function _drawResultScreen(gs) {
 
   ctx.font      = '15px monospace';
   ctx.fillStyle = 'rgba(180,160,120,0.7)';
-  ctx.fillText('クリックで もう一回', CX, CY + 60);
+  ctx.fillText('もう一回あそぶ →', CX, CY + 60);
 
   ctx.restore();
 
-  // Click to restart
-  canvas.onclick = () => {
-    canvas.onclick = null;
-    initGame();
-  };
+  // Show restart button in panel
+  const restartBtn = document.getElementById('restart-btn');
+  if (restartBtn) {
+    restartBtn.classList.remove('hidden');
+    restartBtn.onclick = () => {
+      restartBtn.classList.add('hidden');
+      initGame();
+    };
+  }
 }
 
 // ─── Launch Positions ────────────────────────────────────────────────────────
@@ -666,13 +568,21 @@ function gameLoop() {
 function initGame() {
   // Reset physics world
   Physics.resetPhysics();
-  particles    = [];
-  liveInstances = [];
-  cpuAnimating  = false;
+  particles       = [];
+  liveInstances   = [];
+  cpuAnimating    = false;
   cpuAnimProgress = 0;
   _cpuLaunchParams = null;
-  input.dragging = false;
-  input.path     = [];
+  input.dragging  = false;
+  input.path      = [];
+
+  // Reset launch button
+  const launchBtn = document.getElementById('launch-btn');
+  if (launchBtn) launchBtn.disabled = false;
+
+  // Hide restart button
+  const restartBtn = document.getElementById('restart-btn');
+  if (restartBtn) restartBtn.classList.add('hidden');
 
   // Show top selection UI (defined in index.html)
   if (typeof showTopSelection === 'function') {
