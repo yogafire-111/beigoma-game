@@ -80,7 +80,7 @@
 
     .slider-row {
       display: grid;
-      grid-template-columns: 130px 1fr 58px;
+      grid-template-columns: 118px 1fr 72px;
       align-items: center;
       gap: 6px;
       margin-bottom: 7px;
@@ -100,11 +100,25 @@
       cursor: pointer;
     }
 
-    .val {
+    input[type=number].val {
+      width: 100%;
+      background: #111;
+      border: 1px solid #444;
+      border-radius: 3px;
       color: #ff0;
-      text-align: right;
+      font-family: monospace;
       font-size: 11px;
-      min-width: 55px;
+      padding: 2px 4px;
+      text-align: right;
+      -moz-appearance: textfield;
+    }
+    input[type=number].val:focus {
+      outline: none;
+      border-color: #f90;
+    }
+    input[type=number].val::-webkit-inner-spin-button,
+    input[type=number].val::-webkit-outer-spin-button {
+      opacity: 0.4;
     }
 
     /* ── Top selector ── */
@@ -253,22 +267,22 @@
       <div class="slider-row">
         <label>FORCE_MAX</label>
         <input type="range" id="s-bowl-force" min="0.0001" max="0.006" step="0.0001" />
-        <div class="val" id="v-bowl-force"></div>
+        <input type="number" class="val" id="v-bowl-force" step="0.0001" />
       </div>
       <div class="slider-row">
         <label>DAMPING</label>
         <input type="range" id="s-bowl-damp" min="0" max="0.05" step="0.001" />
-        <div class="val" id="v-bowl-damp"></div>
+        <input type="number" class="val" id="v-bowl-damp" step="0.001" />
       </div>
       <div class="slider-row">
         <label>TENSION</label>
         <input type="range" id="s-bowl-tension" min="0" max="2" step="0.05" />
-        <div class="val" id="v-bowl-tension"></div>
+        <input type="number" class="val" id="v-bowl-tension" step="0.05" />
       </div>
       <div class="slider-row">
         <label>CENTER_DEAD</label>
         <input type="range" id="s-bowl-dead" min="0" max="0.3" step="0.01" />
-        <div class="val" id="v-bowl-dead"></div>
+        <input type="number" class="val" id="v-bowl-dead" step="0.01" />
       </div>
     </div>
   </div>
@@ -279,17 +293,17 @@
       <div class="slider-row">
         <label>Speed</label>
         <input type="range" id="s-launch-speed" min="1" max="20" step="0.5" />
-        <div class="val" id="v-launch-speed"></div>
+        <input type="number" class="val" id="v-launch-speed" step="0.5" />
       </div>
       <div class="slider-row">
         <label>Speed variation</label>
         <input type="range" id="s-launch-var" min="0" max="5" step="0.1" />
-        <div class="val" id="v-launch-var"></div>
+        <input type="number" class="val" id="v-launch-var" step="0.1" />
       </div>
       <div class="slider-row">
         <label>Angle spread</label>
         <input type="range" id="s-launch-spread" min="0" max="1" step="0.02" />
-        <div class="val" id="v-launch-spread"></div>
+        <input type="number" class="val" id="v-launch-spread" step="0.02" />
       </div>
     </div>
   </div>
@@ -300,17 +314,17 @@
       <div class="slider-row">
         <label>Fine (りき まる)</label>
         <input type="range" id="s-tip-fine" min="0.00005" max="0.001" step="0.00005" />
-        <div class="val" id="v-tip-fine"></div>
+        <input type="number" class="val" id="v-tip-fine" step="0.00005" />
       </div>
       <div class="slider-row">
         <label>Round (のーまる)</label>
         <input type="range" id="s-tip-round" min="0.00005" max="0.001" step="0.00005" />
-        <div class="val" id="v-tip-round"></div>
+        <input type="number" class="val" id="v-tip-round" step="0.00005" />
       </div>
       <div class="slider-row">
         <label>Flat (はじき)</label>
         <input type="range" id="s-tip-flat" min="0.00005" max="0.002" step="0.00005" />
-        <div class="val" id="v-tip-flat"></div>
+        <input type="number" class="val" id="v-tip-flat" step="0.00005" />
       </div>
     </div>
   </div>
@@ -321,22 +335,22 @@
       <div class="slider-row">
         <label>Wobble onset</label>
         <input type="range" id="s-thresh-wobble" min="0.01" max="0.2" step="0.005" />
-        <div class="val" id="v-thresh-wobble"></div>
+        <input type="number" class="val" id="v-thresh-wobble" step="0.005" />
       </div>
       <div class="slider-row">
         <label>Fall / die</label>
         <input type="range" id="s-thresh-fall" min="0.005" max="0.1" step="0.005" />
-        <div class="val" id="v-thresh-fall"></div>
+        <input type="number" class="val" id="v-thresh-fall" step="0.005" />
       </div>
       <div class="slider-row">
         <label>Wobble rate</label>
         <input type="range" id="s-wobble-rate" min="0.001" max="0.05" step="0.001" />
-        <div class="val" id="v-wobble-rate"></div>
+        <input type="number" class="val" id="v-wobble-rate" step="0.001" />
       </div>
       <div class="slider-row">
         <label>Side contact pen.</label>
         <input type="range" id="s-side-penalty" min="0" max="0.05" step="0.001" />
-        <div class="val" id="v-side-penalty"></div>
+        <input type="number" class="val" id="v-side-penalty" step="0.001" />
       </div>
     </div>
   </div>
@@ -347,27 +361,27 @@
       <div class="slider-row">
         <label>Spin loss mult.</label>
         <input type="range" id="s-col-loss" min="0.001" max="0.2" step="0.001" />
-        <div class="val" id="v-col-loss"></div>
+        <input type="number" class="val" id="v-col-loss" step="0.001" />
       </div>
       <div class="slider-row">
         <label>Sustain loss</label>
         <input type="range" id="s-col-sustain" min="0" max="0.5" step="0.01" />
-        <div class="val" id="v-col-sustain"></div>
+        <input type="number" class="val" id="v-col-sustain" step="0.01" />
       </div>
       <div class="slider-row">
         <label>Restitution</label>
         <input type="range" id="s-restitution" min="0" max="1" step="0.05" />
-        <div class="val" id="v-restitution"></div>
+        <input type="number" class="val" id="v-restitution" step="0.05" />
       </div>
       <div class="slider-row">
         <label>Body friction</label>
         <input type="range" id="s-friction" min="0" max="0.2" step="0.005" />
-        <div class="val" id="v-friction"></div>
+        <input type="number" class="val" id="v-friction" step="0.005" />
       </div>
       <div class="slider-row">
         <label>Air friction</label>
         <input type="range" id="s-frictionair" min="0" max="0.05" step="0.001" />
-        <div class="val" id="v-frictionair"></div>
+        <input type="number" class="val" id="v-frictionair" step="0.001" />
       </div>
     </div>
   </div>
@@ -378,12 +392,12 @@
       <div class="slider-row">
         <label>Drift strength</label>
         <input type="range" id="s-haj-drift" min="0" max="0.002" step="0.00005" />
-        <div class="val" id="v-haj-drift"></div>
+        <input type="number" class="val" id="v-haj-drift" step="0.00005" />
       </div>
       <div class="slider-row">
         <label>Drift change rate</label>
         <input type="range" id="s-haj-change" min="0" max="0.1" step="0.002" />
-        <div class="val" id="v-haj-change"></div>
+        <input type="number" class="val" id="v-haj-change" step="0.002" />
       </div>
     </div>
   </div>
@@ -456,17 +470,35 @@ function setValue(key, val) {
 function initSliders() {
   SLIDERS.forEach(([sid, vid, key, dec]) => {
     const slider = document.getElementById(sid);
-    const valEl  = document.getElementById(vid);
-    if (!slider || !valEl) return;
+    const numEl  = document.getElementById(vid);
+    if (!slider || !numEl) return;
 
     const current = getValue(key);
     slider.value  = current;
-    valEl.textContent = current.toFixed(dec);
+    numEl.value   = current.toFixed(dec);
 
+    // Slider → number input + live value
     slider.addEventListener('input', () => {
       const v = parseFloat(slider.value);
       setValue(key, v);
-      valEl.textContent = v.toFixed(dec);
+      numEl.value = v.toFixed(dec);
+    });
+
+    // Number input → slider + live value (on Enter or blur)
+    const applyNum = () => {
+      let v = parseFloat(numEl.value);
+      if (isNaN(v)) return;
+      // Clamp to slider min/max
+      const min = parseFloat(slider.min);
+      const max = parseFloat(slider.max);
+      v = Math.max(min, Math.min(max, v));
+      setValue(key, v);
+      slider.value = v;
+      numEl.value  = v.toFixed(dec);
+    };
+    numEl.addEventListener('change', applyNum);
+    numEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') applyNum();
     });
   });
 }
