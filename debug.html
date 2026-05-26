@@ -1,0 +1,647 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Beigoma Debug</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #111;
+      color: #ddd;
+      font-family: monospace;
+      font-size: 12px;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Arena ── */
+    #arena-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      padding: 16px;
+    }
+    #arena {
+      display: block;
+      border-radius: 50%;
+      box-shadow: 0 0 0 3px #2a2620, 0 0 40px rgba(0,0,0,0.8);
+      cursor: crosshair;
+      max-width:  min(800px, calc(100vh - 32px));
+      max-height: min(800px, calc(100vh - 32px));
+      width: 800px;
+      height: 800px;
+    }
+
+    /* ── Debug Panel ── */
+    #debug {
+      width: 320px;
+      height: 100vh;
+      background: #1a1a1a;
+      border-left: 1px solid #333;
+      overflow-y: auto;
+      padding: 12px;
+      flex-shrink: 0;
+    }
+
+    #debug h1 {
+      font-size: 13px;
+      color: #f90;
+      margin-bottom: 12px;
+      letter-spacing: 0.1em;
+      border-bottom: 1px solid #333;
+      padding-bottom: 8px;
+    }
+
+    .section {
+      margin-bottom: 14px;
+      border: 1px solid #2a2a2a;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .section-title {
+      background: #222;
+      padding: 5px 8px;
+      color: #f90;
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      user-select: none;
+    }
+    .section-title:hover { background: #282828; }
+
+    .section-body {
+      padding: 8px;
+    }
+
+    .slider-row {
+      display: grid;
+      grid-template-columns: 130px 1fr 58px;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 7px;
+    }
+
+    .slider-row label {
+      color: #aaa;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    input[type=range] {
+      width: 100%;
+      accent-color: #f90;
+      cursor: pointer;
+    }
+
+    .val {
+      color: #ff0;
+      text-align: right;
+      font-size: 11px;
+      min-width: 55px;
+    }
+
+    /* ── Top selector ── */
+    #top-selector {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .top-btn {
+      padding: 5px 10px;
+      background: #222;
+      border: 1px solid #444;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    .top-btn:hover { border-color: #f90; color: #f90; }
+    .top-btn.active-player { border-color: #4df; color: #4df; background: #1a2a2a; }
+    .top-btn.active-cpu    { border-color: #f64; color: #f64; background: #2a1a1a; }
+
+    #selector-hint {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    /* ── Action buttons ── */
+    .action-row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 6px 12px;
+      border: 1px solid #444;
+      background: #222;
+      color: #ccc;
+      font-family: monospace;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 3px;
+      transition: background 0.1s;
+    }
+    .btn:hover { background: #2a2a2a; border-color: #f90; color: #f90; }
+    .btn.primary { background: #2a1f00; border-color: #f90; color: #f90; }
+    .btn.primary:hover { background: #3a2a00; }
+
+    /* ── Status ── */
+    #status {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 10px;
+      min-height: 16px;
+    }
+    #status.ok  { color: #4f4; }
+    #status.err { color: #f44; }
+
+    /* ── Values export ── */
+    #export-box {
+      background: #0d0d0d;
+      border: 1px solid #333;
+      border-radius: 3px;
+      padding: 8px;
+      font-size: 10px;
+      color: #4f4;
+      white-space: pre;
+      overflow-x: auto;
+      margin-top: 8px;
+      display: none;
+    }
+
+    /* ── Spin bars ── */
+    .spin-display {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+    .spin-label { color: #888; width: 60px; }
+    .spin-track {
+      flex: 1;
+      height: 6px;
+      background: #222;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .spin-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.1s, background 0.3s;
+    }
+    .spin-num { width: 35px; text-align: right; color: #ff0; }
+
+    #debug::-webkit-scrollbar { width: 4px; }
+    #debug::-webkit-scrollbar-track { background: #1a1a1a; }
+    #debug::-webkit-scrollbar-thumb { background: #333; }
+  </style>
+</head>
+<body>
+
+<div id="arena-wrap">
+  <canvas id="arena"></canvas>
+</div>
+
+<div id="debug">
+  <h1>⚙ BEIGOMA DEBUG</h1>
+
+  <div id="status">Select tops then press Launch</div>
+
+  <!-- Top selection -->
+  <div id="selector-hint">PLAYER top (blue) / OPPONENT top (red)</div>
+  <div id="top-selector"></div>
+
+  <!-- Spin display -->
+  <div class="spin-display">
+    <div class="spin-label" id="p-spin-label">player</div>
+    <div class="spin-track"><div class="spin-fill" id="p-spin-fill"></div></div>
+    <div class="spin-num" id="p-spin-num">—</div>
+  </div>
+  <div class="spin-display">
+    <div class="spin-label" id="c-spin-label">opponent</div>
+    <div class="spin-track"><div class="spin-fill" id="c-spin-fill"></div></div>
+    <div class="spin-num" id="c-spin-num">—</div>
+  </div>
+
+  <!-- Action buttons -->
+  <div class="action-row">
+    <button class="btn primary" id="btn-launch">LAUNCH</button>
+    <button class="btn" id="btn-reset">RESET</button>
+    <button class="btn" id="btn-export">EXPORT VALUES</button>
+  </div>
+
+  <div id="export-box"></div>
+
+  <!-- ── Sliders ── -->
+
+  <div class="section">
+    <div class="section-title">BOWL</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>FORCE_MAX</label>
+        <input type="range" id="s-bowl-force" min="0.0001" max="0.006" step="0.0001" />
+        <div class="val" id="v-bowl-force"></div>
+      </div>
+      <div class="slider-row">
+        <label>DAMPING</label>
+        <input type="range" id="s-bowl-damp" min="0" max="0.05" step="0.001" />
+        <div class="val" id="v-bowl-damp"></div>
+      </div>
+      <div class="slider-row">
+        <label>TENSION</label>
+        <input type="range" id="s-bowl-tension" min="0" max="2" step="0.05" />
+        <div class="val" id="v-bowl-tension"></div>
+      </div>
+      <div class="slider-row">
+        <label>CENTER_DEAD</label>
+        <input type="range" id="s-bowl-dead" min="0" max="0.3" step="0.01" />
+        <div class="val" id="v-bowl-dead"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">LAUNCH</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>Speed</label>
+        <input type="range" id="s-launch-speed" min="1" max="20" step="0.5" />
+        <div class="val" id="v-launch-speed"></div>
+      </div>
+      <div class="slider-row">
+        <label>Speed variation</label>
+        <input type="range" id="s-launch-var" min="0" max="5" step="0.1" />
+        <div class="val" id="v-launch-var"></div>
+      </div>
+      <div class="slider-row">
+        <label>Angle spread</label>
+        <input type="range" id="s-launch-spread" min="0" max="1" step="0.02" />
+        <div class="val" id="v-launch-spread"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">TIP FRICTION (spin decay)</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>Fine (りき まる)</label>
+        <input type="range" id="s-tip-fine" min="0.00005" max="0.001" step="0.00005" />
+        <div class="val" id="v-tip-fine"></div>
+      </div>
+      <div class="slider-row">
+        <label>Round (のーまる)</label>
+        <input type="range" id="s-tip-round" min="0.00005" max="0.001" step="0.00005" />
+        <div class="val" id="v-tip-round"></div>
+      </div>
+      <div class="slider-row">
+        <label>Flat (はじき)</label>
+        <input type="range" id="s-tip-flat" min="0.00005" max="0.002" step="0.00005" />
+        <div class="val" id="v-tip-flat"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">SPIN THRESHOLDS</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>Wobble onset</label>
+        <input type="range" id="s-thresh-wobble" min="0.01" max="0.2" step="0.005" />
+        <div class="val" id="v-thresh-wobble"></div>
+      </div>
+      <div class="slider-row">
+        <label>Fall / die</label>
+        <input type="range" id="s-thresh-fall" min="0.005" max="0.1" step="0.005" />
+        <div class="val" id="v-thresh-fall"></div>
+      </div>
+      <div class="slider-row">
+        <label>Wobble rate</label>
+        <input type="range" id="s-wobble-rate" min="0.001" max="0.05" step="0.001" />
+        <div class="val" id="v-wobble-rate"></div>
+      </div>
+      <div class="slider-row">
+        <label>Side contact pen.</label>
+        <input type="range" id="s-side-penalty" min="0" max="0.05" step="0.001" />
+        <div class="val" id="v-side-penalty"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">COLLISIONS</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>Spin loss mult.</label>
+        <input type="range" id="s-col-loss" min="0.001" max="0.2" step="0.001" />
+        <div class="val" id="v-col-loss"></div>
+      </div>
+      <div class="slider-row">
+        <label>Sustain loss</label>
+        <input type="range" id="s-col-sustain" min="0" max="0.5" step="0.01" />
+        <div class="val" id="v-col-sustain"></div>
+      </div>
+      <div class="slider-row">
+        <label>Restitution</label>
+        <input type="range" id="s-restitution" min="0" max="1" step="0.05" />
+        <div class="val" id="v-restitution"></div>
+      </div>
+      <div class="slider-row">
+        <label>Body friction</label>
+        <input type="range" id="s-friction" min="0" max="0.2" step="0.005" />
+        <div class="val" id="v-friction"></div>
+      </div>
+      <div class="slider-row">
+        <label>Air friction</label>
+        <input type="range" id="s-frictionair" min="0" max="0.05" step="0.001" />
+        <div class="val" id="v-frictionair"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">HAJIKI</div>
+    <div class="section-body">
+      <div class="slider-row">
+        <label>Drift strength</label>
+        <input type="range" id="s-haj-drift" min="0" max="0.002" step="0.00005" />
+        <div class="val" id="v-haj-drift"></div>
+      </div>
+      <div class="slider-row">
+        <label>Drift change rate</label>
+        <input type="range" id="s-haj-change" min="0" max="0.1" step="0.002" />
+        <div class="val" id="v-haj-change"></div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /debug -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="js/tops.js"></script>
+<script src="js/physics.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+
+<script>
+// ── Debug tuning vars (override Physics.PHYSICS at runtime) ──────────────────
+
+const DEBUG = {
+  launchSpeed:   7,
+  launchVar:     2,
+  launchSpread:  0.3,
+  restitution:   0.55,
+  friction:      0.02,
+  frictionAir:   0.002,
+  colLossMult:   0.032,
+  colSustain:    0.08,
+};
+
+// ── Slider definitions ────────────────────────────────────────────────────────
+
+const SLIDERS = [
+  // [sliderId, valueId, physicsKey or debugKey, decimals]
+  ['s-bowl-force',   'v-bowl-force',   'BOWL_FORCE_MAX',        5],
+  ['s-bowl-damp',    'v-bowl-damp',    'BOWL_DAMPING',          4],
+  ['s-bowl-tension', 'v-bowl-tension', 'BOWL_TENSION',          2],
+  ['s-bowl-dead',    'v-bowl-dead',    'BOWL_CENTER_DEAD',      2],
+  ['s-launch-speed', 'v-launch-speed', 'debug:launchSpeed',     1],
+  ['s-launch-var',   'v-launch-var',   'debug:launchVar',       1],
+  ['s-launch-spread','v-launch-spread','debug:launchSpread',    2],
+  ['s-tip-fine',     'v-tip-fine',     'tip:fine',              5],
+  ['s-tip-round',    'v-tip-round',    'tip:round',             5],
+  ['s-tip-flat',     'v-tip-flat',     'tip:flat',              5],
+  ['s-thresh-wobble','v-thresh-wobble','SPIN_DEAD_THRESH',      3],
+  ['s-thresh-fall',  'v-thresh-fall',  'SPIN_FALL_THRESH',      3],
+  ['s-wobble-rate',  'v-wobble-rate',  'WOBBLE_RATE',           3],
+  ['s-side-penalty', 'v-side-penalty', 'SIDE_CONTACT_PENALTY',  3],
+  ['s-col-loss',     'v-col-loss',     'debug:colLossMult',     3],
+  ['s-col-sustain',  'v-col-sustain',  'debug:colSustain',      2],
+  ['s-restitution',  'v-restitution',  'debug:restitution',     2],
+  ['s-friction',     'v-friction',     'debug:friction',        3],
+  ['s-frictionair',  'v-frictionair',  'debug:frictionAir',     3],
+  ['s-haj-drift',    'v-haj-drift',    'HAJIKI_DRIFT_STRENGTH', 5],
+  ['s-haj-change',   'v-haj-change',   'HAJIKI_DRIFT_CHANGE',   3],
+];
+
+// ── Get/set value by key ──────────────────────────────────────────────────────
+
+function getValue(key) {
+  if (key.startsWith('debug:'))  return DEBUG[key.slice(6)];
+  if (key.startsWith('tip:'))    return TIP_FRICTION[key.slice(4)];
+  return Physics.PHYSICS[key];
+}
+
+function setValue(key, val) {
+  if (key.startsWith('debug:'))     { DEBUG[key.slice(6)] = val; return; }
+  if (key.startsWith('tip:'))       { TIP_FRICTION[key.slice(4)] = val; return; }
+  Physics.PHYSICS[key] = val;
+}
+
+// ── Init sliders ──────────────────────────────────────────────────────────────
+
+function initSliders() {
+  SLIDERS.forEach(([sid, vid, key, dec]) => {
+    const slider = document.getElementById(sid);
+    const valEl  = document.getElementById(vid);
+    if (!slider || !valEl) return;
+
+    const current = getValue(key);
+    slider.value  = current;
+    valEl.textContent = current.toFixed(dec);
+
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      setValue(key, v);
+      valEl.textContent = v.toFixed(dec);
+    });
+  });
+}
+
+// ── Top selector ──────────────────────────────────────────────────────────────
+
+let _playerTop = 'nomaru';
+let _cpuTop    = 'hajiki';
+let _selecting = 'player'; // 'player' or 'cpu'
+
+function buildTopSelector() {
+  const wrap = document.getElementById('top-selector');
+  wrap.innerHTML = '';
+  Tops.TOP_ORDER.forEach(id => {
+    const def = Tops.TOP_DEFS[id];
+    const btn = document.createElement('button');
+    btn.className   = 'top-btn';
+    btn.textContent = def.hiragana;
+    btn.dataset.id  = id;
+    btn.addEventListener('click', () => {
+      if (_selecting === 'player') {
+        _playerTop = id;
+      } else {
+        _cpuTop = id;
+      }
+      updateTopBtnStates();
+    });
+    wrap.appendChild(btn);
+  });
+
+  // Toggle player/cpu selecting
+  const hint = document.getElementById('selector-hint');
+  hint.style.cursor = 'pointer';
+  hint.addEventListener('click', () => {
+    _selecting = _selecting === 'player' ? 'cpu' : 'player';
+    hint.textContent = _selecting === 'player'
+      ? 'PLAYER top (blue) / click to switch to OPPONENT'
+      : 'OPPONENT top (red) / click to switch to PLAYER';
+    updateTopBtnStates();
+  });
+
+  updateTopBtnStates();
+}
+
+function updateTopBtnStates() {
+  document.querySelectorAll('.top-btn').forEach(btn => {
+    btn.classList.remove('active-player', 'active-cpu');
+    if (btn.dataset.id === _playerTop) btn.classList.add('active-player');
+    if (btn.dataset.id === _cpuTop)    btn.classList.add('active-cpu');
+  });
+}
+
+// ── Launch (overrides main.js handlePlayerLaunchButton) ───────────────────────
+
+function handlePlayerLaunchButton() {
+  const gs = Game.getGameState();
+  if (gs.phase !== 'player_launch') return;
+
+  const pos       = { x: 400, y: 400 + 340 * 0.78 };
+  const spread    = (Math.random() - 0.5) * DEBUG.launchSpread;
+  const aimAngle  = -Math.PI / 2 + spread;
+
+  const result = Game.playerLaunch(aimAngle, 0.88);
+  if (!result) return;
+
+  const speed  = DEBUG.launchSpeed + Math.random() * DEBUG.launchVar;
+  Physics.addTopToWorld(
+    gs.playerTop,
+    pos.x, pos.y,
+    Math.cos(result.angle) * speed,
+    Math.sin(result.angle) * speed,
+    result.spin
+  );
+  setStatus('Player launched', 'ok');
+}
+
+// ── showTopSelection override ─────────────────────────────────────────────────
+
+function showTopSelection(callback) {
+  // In debug mode, skip UI -- use selected tops directly
+  callback(_playerTop, _cpuTop);
+}
+
+// ── Spin bar updater ──────────────────────────────────────────────────────────
+
+function updateDebugSpinBars() {
+  const gs = Game.getGameState();
+
+  const updateBar = (inst, fillId, numId, labelId) => {
+    const fill = document.getElementById(fillId);
+    const num  = document.getElementById(numId);
+    const lbl  = document.getElementById(labelId);
+    if (!inst) return;
+    if (lbl) lbl.textContent = inst.def.hiragana;
+    const pct  = Math.round((inst.spinSpeed || 0) * 100);
+    const col  = pct > 50 ? '#4f4' : pct > 20 ? '#ff0' : '#f64';
+    if (fill) { fill.style.width = pct + '%'; fill.style.background = col; }
+    if (num)  num.textContent = pct + '%';
+  };
+
+  updateBar(gs.playerTop, 'p-spin-fill', 'p-spin-num', 'p-spin-label');
+  updateBar(gs.cpuTop,    'c-spin-fill', 'c-spin-num', 'c-spin-label');
+
+  requestAnimationFrame(updateDebugSpinBars);
+}
+
+// ── Status message ────────────────────────────────────────────────────────────
+
+function setStatus(msg, type) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className   = type || '';
+}
+
+// ── Export values ─────────────────────────────────────────────────────────────
+
+document.getElementById('btn-export').addEventListener('click', () => {
+  const box = document.getElementById('export-box');
+  box.style.display = 'block';
+
+  const lines = [
+    '// Bake these into physics.js / main.js\n',
+    '// PHYSICS constants:',
+    `BOWL_FORCE_MAX:          ${Physics.PHYSICS.BOWL_FORCE_MAX},`,
+    `BOWL_DAMPING:            ${Physics.PHYSICS.BOWL_DAMPING},`,
+    `BOWL_TENSION:            ${Physics.PHYSICS.BOWL_TENSION},`,
+    `BOWL_CENTER_DEAD:        ${Physics.PHYSICS.BOWL_CENTER_DEAD},`,
+    `SPIN_DEAD_THRESH:        ${Physics.PHYSICS.SPIN_DEAD_THRESH},`,
+    `SPIN_FALL_THRESH:        ${Physics.PHYSICS.SPIN_FALL_THRESH},`,
+    `WOBBLE_RATE:             ${Physics.PHYSICS.WOBBLE_RATE},`,
+    `SIDE_CONTACT_PENALTY:    ${Physics.PHYSICS.SIDE_CONTACT_PENALTY},`,
+    `HAJIKI_DRIFT_STRENGTH:   ${Physics.PHYSICS.HAJIKI_DRIFT_STRENGTH},`,
+    `HAJIKI_DRIFT_CHANGE:     ${Physics.PHYSICS.HAJIKI_DRIFT_CHANGE},`,
+    '',
+    '// TIP_FRICTION:',
+    `fine:  ${TIP_FRICTION.fine},`,
+    `round: ${TIP_FRICTION.round},`,
+    `flat:  ${TIP_FRICTION.flat},`,
+    '',
+    '// Launch / body (main.js / addTopToWorld):',
+    `launchSpeed:  ${DEBUG.launchSpeed},`,
+    `launchVar:    ${DEBUG.launchVar},`,
+    `launchSpread: ${DEBUG.launchSpread},`,
+    `restitution:  ${DEBUG.restitution},`,
+    `friction:     ${DEBUG.friction},`,
+    `frictionAir:  ${DEBUG.frictionAir},`,
+    '',
+    '// Collision:',
+    `colLossMult:  ${DEBUG.colLossMult},`,
+    `colSustain:   ${DEBUG.colSustain},`,
+  ];
+
+  box.textContent = lines.join('\n');
+});
+
+// ── Reset ─────────────────────────────────────────────────────────────────────
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  initGame();
+  setStatus('Reset. Select tops and launch.', '');
+  document.getElementById('export-box').style.display = 'none';
+});
+
+document.getElementById('btn-launch').addEventListener('click', () => {
+  handlePlayerLaunchButton();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+window.addEventListener('load', () => {
+  initSliders();
+  buildTopSelector();
+  updateDebugSpinBars();
+  setStatus('Ready. Select tops and launch.', '');
+});
+</script>
+</body>
+</html>
