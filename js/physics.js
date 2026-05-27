@@ -42,6 +42,11 @@ const PHYSICS = {
   // Fade-out
   FADE_RATE:        0.018,     // opacity lost per frame once dead
 
+  // Corner strike / ejection
+  CORNER_STRIKE_THRESHOLD: 1.5,   // minimum force to trigger check
+  CORNER_STRIKE_IMPULSE:   8.0,   // base outward velocity -- tune for ejection frequency
+  CORNER_STRIKE_CHANCE:    0.55,  // probability when threshold met (tune toward 40-50% ejection rate)
+
   // Engine
   FPS:              60,
   GRAVITY_SCALE:    0,         // we handle all forces manually
@@ -382,6 +387,9 @@ function _handleCollisionPairs(pairs, isInitial) {
       _applyDeflection(instA, bodyA, bodyB, force);
       _applyDeflection(instB, bodyB, bodyA, force);
 
+      // Corner strike -- potential ejection
+      _applyCornerStrike(instA, instB, bodyA, bodyB, force);
+
       // Riki hexagon edge -- periodic sharp impulse
       if (instA.defId === 'riki' || instB.defId === 'riki') {
         _applyHexagonImpulse(instA, instB, bodyA, bodyB);
@@ -482,6 +490,72 @@ function _applyDeflection(instance, ownBody, otherBody, force) {
     });
   }
   // nomaru / riki: standard Matter.js response
+}
+
+// ─── Corner Strike ───────────────────────────────────────────────────────────
+
+// Hexagonal tops (nomaru, riki, hajiki) can land corner-on-corner hits that
+// launch one or both tops outward with enough force to overcome bowl pull.
+// Maru has no corners -- can receive a strike but never initiates one.
+
+function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
+  if (force < PHYSICS.CORNER_STRIKE_THRESHOLD) return;
+
+  // Maru has no corners -- cannot initiate a corner strike
+  const aCanStrike = instA.defId !== 'maru';
+  const bCanStrike = instB.defId !== 'maru';
+  if (!aCanStrike && !bCanStrike) return;
+
+  if (Math.random() > PHYSICS.CORNER_STRIKE_CHANCE) return;
+
+  // Scale impulse by force -- harder hits launch further
+  const impulseScale = Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0);
+  const impulse = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
+
+  // Determine who gets launched.
+  // If only one has corners, that one strikes the other.
+  // If both have corners, the one with lower spin * stability gets launched.
+  let striker, target, strikerBody, targetBody;
+
+  if (aCanStrike && !bCanStrike) {
+    striker = instA; strikerBody = bodyA;
+    target  = instB; targetBody  = bodyB;
+  } else if (bCanStrike && !aCanStrike) {
+    striker = instB; strikerBody = bodyB;
+    target  = instA; targetBody  = bodyA;
+  } else {
+    // Both hexagonal -- lower spin * stability gets launched
+    const scoreA = instA.spinSpeed * instA.def.stability;
+    const scoreB = instB.spinSpeed * instB.def.stability;
+    if (scoreA < scoreB) {
+      striker = instB; strikerBody = bodyB;
+      target  = instA; targetBody  = bodyA;
+    } else {
+      striker = instA; strikerBody = bodyA;
+      target  = instB; targetBody  = bodyB;
+    }
+  }
+
+  // Outward direction: away from striker
+  const dx = targetBody.position.x - strikerBody.position.x;
+  const dy = targetBody.position.y - strikerBody.position.y;
+  const mag = Math.hypot(dx, dy) || 1;
+
+  // Apply outward velocity to target -- blended with existing velocity
+  const currentSpd = Math.hypot(targetBody.velocity.x, targetBody.velocity.y);
+  Matter.Body.setVelocity(targetBody, {
+    x: (dx / mag) * (impulse + currentSpd * 0.5),
+    y: (dy / mag) * (impulse + currentSpd * 0.5),
+  });
+
+  // Hajiki self-ejection -- 30% chance it also gets launched on its own strike
+  if (striker.defId === 'hajiki' && Math.random() < 0.30) {
+    const selfImpulse = impulse * 0.7;
+    Matter.Body.setVelocity(strikerBody, {
+      x: -(dx / mag) * selfImpulse,
+      y: -(dy / mag) * selfImpulse,
+    });
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
