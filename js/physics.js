@@ -22,7 +22,7 @@ const PHYSICS = {
   SPIN_LAUNCH_MAX:  1.0,       // normalized spin at launch (1.0 = perfect throw)
   SPIN_DEAD_THRESH: 0.08,      // below this → top starts wobbling
   SPIN_FALL_THRESH: 0.03,      // below this → top falls and dies
-  SIDE_CONTACT_PENALTY: 0.006, // extra spin loss per frame when sides rub canvas (large -- body contact is devastating)
+  SIDE_CONTACT_PENALTY: 0.006, // extra spin loss per frame when sides rub canvas
   WOBBLE_RATE:      0.012,     // how fast tilt increases once wobbling starts
 
   // Collision
@@ -31,16 +31,16 @@ const PHYSICS = {
   JUMP_HEIGHT_MAX:  18,        // px of upward visual offset during jump
 
   // Hajiki drift
-  HAJIKI_DRIFT_STRENGTH: 0.00018, // reduced -- erratic but not chaotic
-  HAJIKI_DRIFT_CHANGE:   0.018,   // direction shifts less often
+  HAJIKI_DRIFT_STRENGTH: 0.00018,
+  HAJIKI_DRIFT_CHANGE:   0.018,
 
   // Sharp tip sticking (Riki, Maru)
-  STICK_CHANCE:     0.0006,    // per-frame probability when near center
-  STICK_RADIUS:     90,        // px from center where sticking can occur
-  STICK_DURATION:   90,        // frames a stuck top stays stuck
+  STICK_CHANCE:     0.0006,
+  STICK_RADIUS:     90,
+  STICK_DURATION:   90,
 
   // Fade-out
-  FADE_RATE:        0.018,     // opacity lost per frame once dead
+  FADE_RATE:        0.018,
 
   // Corner strike / ejection
   CORNER_STRIKE_THRESHOLD: 1.5,   // minimum force to trigger check
@@ -49,29 +49,19 @@ const PHYSICS = {
 
   // Engine
   FPS:              60,
-  GRAVITY_SCALE:    0,         // we handle all forces manually
+  GRAVITY_SCALE:    0,
 };
 
 // ─── Module State ────────────────────────────────────────────────────────────
 
 let engine   = null;
 let world    = null;
-let arenaBodies = [];   // static boundary bodies
-let topBodies   = {};   // map of instance id → Matter body
-
-// Per-top extended state (physics details not on the instance itself)
+let arenaBodies = [];
+let topBodies   = {};
 let topPhysState = {};
-// topPhysState[id] = {
-//   driftAngle,       // current hajiki drift direction (radians)
-//   stuckFrames,      // frames remaining if stuck (0 = not stuck)
-//   jumpOffset,       // current visual Y jump offset
-//   jumpVel,          // jump velocity (decays)
-//   tickPhase,        // accumulated rotation for rim tick animation
-// }
 
-// Callbacks set by game.js
-let onTopDied     = null;   // fn(instance)
-let onCollision   = null;   // fn(instanceA, instanceB, force)
+let onTopDied     = null;
+let onCollision   = null;
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -86,24 +76,16 @@ function initPhysics(callbacks) {
   _attachCollisionHandler();
 }
 
-// Build circular arena wall from many small static segments
 function _buildArena() {
-  // No physical wall -- bowl force contains tops naturally
   arenaBodies = [];
 }
 
 // ─── Add / Remove Tops ───────────────────────────────────────────────────────
 
-// Called by game.js when a top is launched into the arena.
-// instance: top instance from tops.js
-// x, y: launch position (canvas coords)
-// vx, vy: initial velocity
-// spinSpeed: 0–1 normalized
-// Body params -- can be overridden by debug.html at runtime
 const BODY_PARAMS = {
   friction:    0.03,
   frictionAir: 0.001,
-  restitution: 0.35,   // lower -- canvas absorbs more energy than billiard table
+  restitution: 0.35,
   colLossMult: 0.08,
   colSustain:  0.06,
 };
@@ -122,7 +104,6 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
   Matter.Body.setVelocity(body, { x: vx, y: vy });
   Matter.World.add(world, body);
 
-  // Store references
   const id = _instanceId(instance);
   topBodies[id]    = body;
   instance.body    = body;
@@ -151,7 +132,6 @@ function removeTopFromWorld(instance) {
 
 // ─── Per-Frame Update ────────────────────────────────────────────────────────
 
-// Call this every frame from main.js game loop, passing all live instances.
 function updatePhysics(instances) {
   Matter.Engine.update(engine, 1000 / PHYSICS.FPS);
 
@@ -170,29 +150,25 @@ function updatePhysics(instances) {
     const dy   = body.position.y - cy;
     const dist = Math.hypot(dx, dy);
 
-    // ── Out of bounds check -- eject if past rim ──
+    // ── Out of bounds check ──
     if (dist > PHYSICS.ARENA_RADIUS * PHYSICS.EJECT_RADIUS && instance.alive) {
       instance.alive    = false;
       instance.ejected  = true;
-      Matter.Body.setStatic(body, true);  // freeze in place
+      Matter.Body.setStatic(body, true);
       if (onTopDied) onTopDied(instance);
     }
 
-    // ── Dead top -- static, just fade out ──
     if (!instance.alive) {
       instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
       continue;
     }
 
-    // ── Bowl force ──
     _applyBowlForce(body, dx, dy, dist);
 
-    // ── Hajiki drift ──
     if (instance.defId === 'hajiki') {
       _applyHajikiDrift(body, pstate);
     }
 
-    // ── Sharp tip sticking ──
     if (instance.def.tipType === 'fine' && pstate.stuckFrames <= 0) {
       _checkSticking(body, pstate, dist, instance.spinSpeed);
     }
@@ -201,26 +177,18 @@ function updatePhysics(instances) {
       pstate.stuckFrames--;
     }
 
-    // ── Spin decay ──
     _updateSpinDecay(instance, body, dist);
-
-    // ── Jump animation ──
     _updateJump(pstate);
 
-    // ── Tick phase (rim animation) ──
     pstate.tickPhase += instance.spinSpeed * 0.18;
-
-    // ── Sync visual angle from physics body ──
     instance.angle = body.angle + pstate.tickPhase * 0.5;
 
-    // ── Death check ──
     if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
       instance.alive = false;
       if (body) Matter.Body.setStatic(body, true);
       if (onTopDied) onTopDied(instance);
     }
 
-    // ── Fade out dead tops ──
     if (!instance.alive) {
       instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
     }
@@ -239,20 +207,16 @@ function _applyBowlForce(body, dx, dy, dist) {
   const tension = PHYSICS.BOWL_TENSION;
   const slope   = Math.pow(t, 1.5 + tension);
 
-  // Inward pull
   const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
-  const nx = dx / dist;  // unit vector outward from center
+  const nx = dx / dist;
   const ny = dy / dist;
   Matter.Body.applyForce(body, body.position, {
     x: -nx * forceMag,
     y: -ny * forceMag,
   });
 
-  // Directional damping -- only damp the RADIAL component of velocity.
-  // This preserves tangential (orbital) velocity, creating the spiral inward.
-  // Damping the full velocity vector killed the spiral entirely.
-  const vel    = body.velocity;
-  const radialV = vel.x * nx + vel.y * ny;  // dot product = radial speed
+  const vel     = body.velocity;
+  const radialV = vel.x * nx + vel.y * ny;
   Matter.Body.applyForce(body, body.position, {
     x: -nx * radialV * PHYSICS.BOWL_DAMPING * body.mass,
     y: -ny * radialV * PHYSICS.BOWL_DAMPING * body.mass,
@@ -262,7 +226,6 @@ function _applyBowlForce(body, dx, dy, dist) {
 // ─── Hajiki Drift ────────────────────────────────────────────────────────────
 
 function _applyHajikiDrift(body, pstate) {
-  // Occasionally shift drift direction
   if (Math.random() < PHYSICS.HAJIKI_DRIFT_CHANGE) {
     pstate.driftAngle += (Math.random() - 0.5) * Math.PI * 0.9;
   }
@@ -277,7 +240,6 @@ function _applyHajikiDrift(body, pstate) {
 
 function _checkSticking(body, pstate, dist, spinSpeed) {
   if (dist > PHYSICS.STICK_RADIUS) return;
-  // More likely to stick when spinning slower
   const chance = PHYSICS.STICK_CHANCE * (1.2 - spinSpeed);
   if (Math.random() < chance) {
     pstate.stuckFrames = PHYSICS.STICK_DURATION;
@@ -286,43 +248,31 @@ function _checkSticking(body, pstate, dist, spinSpeed) {
 
 // ─── Spin Decay ──────────────────────────────────────────────────────────────
 
-// ─── Spin Decay ──────────────────────────────────────────────────────────────
-// Spin slows due to friction between tip and canvas surface.
-// Contact area of tip is the key variable -- fine point < round < flat line.
-// Heavier tops press harder on tip (more friction) but gyroscopic mass helps stability.
-
 const TIP_FRICTION = {
-  fine:  0.000120,   // Riki, Maru -- fine point, minimal contact area
-  round: 0.000195,   // Nōmaru -- round tip, moderate contact
-  flat:  0.000380,   // Hajiki -- flat line tip, maximum contact area
+  fine:  0.000120,
+  round: 0.000195,
+  flat:  0.000380,
 };
 
 function _updateSpinDecay(instance, body, dist) {
-  const def   = instance.def;
+  const def = instance.def;
 
-  // Base decay from tip-canvas friction
-  // Mass increases downward force on tip → more friction, but heavier tops
-  // also have more rotational inertia → net effect is roughly neutral on duration,
-  // which matches real beigoma (weight matters less than tip shape for spin duration)
   const tipFriction  = TIP_FRICTION[def.tipType] || TIP_FRICTION.round;
-  const massPressure = 0.85 + def.mass * 0.18;  // heavier = slightly more friction
-  const alignFactor  = 1.9 - instance.alignment; // poor alignment = more wobble = more friction
+  const massPressure = 0.85 + def.mass * 0.18;
+  const alignFactor  = 1.9 - instance.alignment;
 
   let decay = tipFriction * massPressure * alignFactor;
 
-  // Side contact penalty -- only kicks in at significant tilt
-  // Below 0.6 tilt, top is still mostly upright -- no body contact
   if (instance.tilt > 0.6 || instance.sideContact) {
-    const tiltFactor = Math.max(0, instance.tilt - 0.6) / 0.4; // 0 at tilt=0.6, 1 at tilt=1.0
+    const tiltFactor = Math.max(0, instance.tilt - 0.6) / 0.4;
     decay += PHYSICS.SIDE_CONTACT_PENALTY * tiltFactor * 3;
-    instance.sideContact = instance.tilt > 0.75; // only lock in sideContact at severe tilt
+    instance.sideContact = instance.tilt > 0.75;
   } else {
     instance.sideContact = false;
   }
 
   instance.spinSpeed = Math.max(0, instance.spinSpeed - decay);
 
-  // Wobble onset: below dead threshold, tilt increases
   if (instance.spinSpeed < PHYSICS.SPIN_DEAD_THRESH) {
     instance.tilt = Math.min(1.0, instance.tilt + PHYSICS.WOBBLE_RATE);
   } else {
@@ -335,7 +285,7 @@ function _updateSpinDecay(instance, body, dist) {
 function _updateJump(pstate) {
   if (pstate.jumpOffset > 0 || pstate.jumpVel > 0) {
     pstate.jumpOffset += pstate.jumpVel;
-    pstate.jumpVel    -= 1.1;   // gravity pulls it back down
+    pstate.jumpVel    -= 1.1;
     if (pstate.jumpOffset <= 0) {
       pstate.jumpOffset = 0;
       pstate.jumpVel    = 0;
@@ -344,20 +294,17 @@ function _updateJump(pstate) {
 }
 
 function _triggerJump(pstate) {
-  if (pstate.jumpOffset > 0) return; // already jumping
+  if (pstate.jumpOffset > 0) return;
   pstate.jumpVel = 6 + Math.random() * 6;
 }
 
 // ─── Collision Handler ───────────────────────────────────────────────────────
 
 function _attachCollisionHandler() {
-  // Initial impact
   Matter.Events.on(engine, 'collisionStart', (event) => {
     _handleCollisionPairs(event.pairs, true);
   });
 
-  // Sustained contact -- runs every frame while touching
-  // Scaled down vs initial impact but accumulates over time
   Matter.Events.on(engine, 'collisionActive', (event) => {
     _handleCollisionPairs(event.pairs, false);
   });
@@ -381,7 +328,6 @@ function _handleCollisionPairs(pairs, isInitial) {
     instB.hasContacted = true;
 
     if (isInitial) {
-      // Sharp impact -- full spin loss
       _applyCollisionSpinLoss(instA, instB, force, 1.0);
       _applyCollisionSpinLoss(instB, instA, force, 1.0);
       _applyDeflection(instA, bodyA, bodyB, force);
@@ -390,12 +336,10 @@ function _handleCollisionPairs(pairs, isInitial) {
       // Corner strike -- potential ejection
       _applyCornerStrike(instA, instB, bodyA, bodyB, force);
 
-      // Riki hexagon edge -- periodic sharp impulse
       if (instA.defId === 'riki' || instB.defId === 'riki') {
         _applyHexagonImpulse(instA, instB, bodyA, bodyB);
       }
 
-      // Rare jump on high impact
       if (force > PHYSICS.JUMP_FORCE_MIN && Math.random() < PHYSICS.JUMP_CHANCE) {
         const pA = topPhysState[_instanceId(instA)];
         const pB = topPhysState[_instanceId(instB)];
@@ -406,8 +350,6 @@ function _handleCollisionPairs(pairs, isInitial) {
       if (onCollision) onCollision(instA, instB, force);
 
     } else {
-      // Sustained grinding contact -- smaller per-frame loss
-      // Only significant if they're actually rubbing (low relative velocity)
       if (force < 1.5) {
         _applyCollisionSpinLoss(instA, instB, 0.4, BODY_PARAMS.colSustain);
         _applyCollisionSpinLoss(instB, instA, 0.4, BODY_PARAMS.colSustain);
@@ -416,15 +358,14 @@ function _handleCollisionPairs(pairs, isInitial) {
   }
 }
 
+// ─── Hexagon Impulse ─────────────────────────────────────────────────────────
+
 function _applyHexagonImpulse(instA, instB, bodyA, bodyB) {
-  // When Riki's hexagon edge rotates past contact point, it creates
-  // a periodic sharp push rather than smooth sliding
-  const rikiInst = instA.defId === 'riki' ? instA : instB;
-  const rikiBody = instA.defId === 'riki' ? bodyA : bodyB;
+  const rikiInst  = instA.defId === 'riki' ? instA : instB;
+  const rikiBody  = instA.defId === 'riki' ? bodyA : bodyB;
   const otherBody = instA.defId === 'riki' ? bodyB : bodyA;
   const otherInst = instA.defId === 'riki' ? instB : instA;
 
-  // Impulse fires based on rotation phase (6 edges = every PI/3 radians)
   const phase = rikiBody.angle % (Math.PI / 3);
   if (phase < 0.15) {
     const awayX = otherBody.position.x - rikiBody.position.x;
@@ -435,25 +376,22 @@ function _applyHexagonImpulse(instA, instB, bodyA, bodyB) {
       x: (awayX / mag) * impulse,
       y: (awayY / mag) * impulse,
     });
-    // Spin loss on the receiving top
     otherInst.spinSpeed = Math.max(0, otherInst.spinSpeed - 0.025 * rikiInst.spinSpeed);
   }
 }
+
+// ─── Collision Spin Loss ─────────────────────────────────────────────────────
 
 function _applyCollisionSpinLoss(instance, opponent, force, scale) {
   const s         = scale !== undefined ? scale : 1.0;
   const impactMod = opponent.def.impactForce;
   const massMod   = opponent.def.mass / instance.def.mass;
-
-  // Deflection reduces damage taken -- Maru's smooth deflect absorbs less impact
-  // deflection stat: higher = more energy redirected away = less spin loss
   const deflectAbsorb = 1.0 - (instance.def.deflection * 0.5);
 
   const loss = force * BODY_PARAMS.colLossMult * impactMod * massMod
              * (1.1 - instance.def.stability) * deflectAbsorb * s;
   instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
 
-  // Tilt from hard hits -- scaled by stability
   const tipThreshold = 0.8 * instance.def.stability;
   if (force * impactMod > tipThreshold) {
     const excess = (force * impactMod - tipThreshold) / tipThreshold;
@@ -461,29 +399,26 @@ function _applyCollisionSpinLoss(instance, opponent, force, scale) {
   }
 }
 
+// ─── Deflection ──────────────────────────────────────────────────────────────
+
 function _applyDeflection(instance, ownBody, otherBody, force) {
-  const deflection = instance.def.deflection;
   const dvx = ownBody.velocity.x;
   const dvy = ownBody.velocity.y;
 
   if (instance.defId === 'maru') {
-    // Smooth deflect: redirect cleanly away, preserving most speed
-    // Round profile means glancing contact -- energy redirected not absorbed
     const awayX = ownBody.position.x - otherBody.position.x;
     const awayY = ownBody.position.y - otherBody.position.y;
     const mag   = Math.hypot(awayX, awayY) || 1;
     const spd   = Math.hypot(dvx, dvy);
-    // Preserve 85% of speed, redirect away -- slippery
     Matter.Body.setVelocity(ownBody, {
       x: (awayX / mag) * spd * 0.85,
       y: (awayY / mag) * spd * 0.85,
     });
 
   } else if (instance.defId === 'hajiki') {
-    // Erratic deflect: random direction, loses some speed unpredictably
     const randAngle = Math.random() * Math.PI * 2;
     const spd       = Math.hypot(dvx, dvy);
-    const keep      = 0.5 + Math.random() * 0.3; // 50-80% speed retained
+    const keep      = 0.5 + Math.random() * 0.3;
     Matter.Body.setVelocity(ownBody, {
       x: Math.cos(randAngle) * spd * keep,
       y: Math.sin(randAngle) * spd * keep,
@@ -499,22 +434,21 @@ function _applyDeflection(instance, ownBody, otherBody, force) {
 // Maru has no corners -- can receive a strike but never initiates one.
 
 function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
+  console.log(`CORNER CHECK force:${force.toFixed(2)}`);
+
   if (force < PHYSICS.CORNER_STRIKE_THRESHOLD) return;
 
-  // Maru has no corners -- cannot initiate a corner strike
   const aCanStrike = instA.defId !== 'maru';
   const bCanStrike = instB.defId !== 'maru';
   if (!aCanStrike && !bCanStrike) return;
 
   if (Math.random() > PHYSICS.CORNER_STRIKE_CHANCE) return;
 
-  // Scale impulse by force -- harder hits launch further
+  console.log(`CORNER STRIKE force:${force.toFixed(2)} impulse:${(PHYSICS.CORNER_STRIKE_IMPULSE * Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0)).toFixed(2)}`);
+
   const impulseScale = Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0);
   const impulse = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
 
-  // Determine who gets launched.
-  // If only one has corners, that one strikes the other.
-  // If both have corners, the one with lower spin * stability gets launched.
   let striker, target, strikerBody, targetBody;
 
   if (aCanStrike && !bCanStrike) {
@@ -524,7 +458,6 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
     striker = instB; strikerBody = bodyB;
     target  = instA; targetBody  = bodyA;
   } else {
-    // Both hexagonal -- lower spin * stability gets launched
     const scoreA = instA.spinSpeed * instA.def.stability;
     const scoreB = instB.spinSpeed * instB.def.stability;
     if (scoreA < scoreB) {
@@ -536,19 +469,17 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
     }
   }
 
-  // Outward direction: away from striker
   const dx = targetBody.position.x - strikerBody.position.x;
   const dy = targetBody.position.y - strikerBody.position.y;
   const mag = Math.hypot(dx, dy) || 1;
 
-  // Apply outward velocity to target -- blended with existing velocity
   const currentSpd = Math.hypot(targetBody.velocity.x, targetBody.velocity.y);
   Matter.Body.setVelocity(targetBody, {
     x: (dx / mag) * (impulse + currentSpd * 0.5),
     y: (dy / mag) * (impulse + currentSpd * 0.5),
   });
 
-  // Hajiki self-ejection -- 30% chance it also gets launched on its own strike
+  // Hajiki self-ejection -- 30% chance
   if (striker.defId === 'hajiki' && Math.random() < 0.30) {
     const selfImpulse = impulse * 0.7;
     Matter.Body.setVelocity(strikerBody, {
@@ -560,7 +491,6 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// Simple instance ID: owner + defId (assumes max one of each per owner in arena)
 function _instanceId(instance) {
   return `${instance.owner}_${instance.defId}`;
 }
@@ -568,16 +498,12 @@ function _instanceId(instance) {
 function _findInstanceByBody(body) {
   for (const [id, b] of Object.entries(topBodies)) {
     if (b === body) {
-      // Retrieve instance via game.js callback isn't available here,
-      // so we return the id and let the caller resolve -- see note below.
       return _instanceRegistry[id] || null;
     }
   }
   return null;
 }
 
-// Instance registry: game.js registers instances here so collision
-// handler can look them up by id.
 const _instanceRegistry = {};
 
 function registerInstance(instance) {
@@ -588,19 +514,17 @@ function unregisterInstance(instance) {
   delete _instanceRegistry[_instanceId(instance)];
 }
 
-// Get the extended physics state for a top (for rendering jump offset, tick phase)
 function getPhysState(instance) {
   return topPhysState[_instanceId(instance)] || null;
 }
 
-// Reset everything between matches
 function resetPhysics() {
   if (world) {
     Matter.World.clear(world);
     Matter.Engine.clear(engine);
   }
-  topBodies        = {};
-  topPhysState     = {};
+  topBodies    = {};
+  topPhysState = {};
   Object.keys(_instanceRegistry).forEach(k => delete _instanceRegistry[k]);
   _buildArena();
 }
