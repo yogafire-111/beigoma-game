@@ -11,12 +11,12 @@ const PHYSICS = {
 
   // Bowl
   BOWL_TENSION:     0.5,
-  BOWL_FORCE_MAX:   0.0022,
-  BOWL_DAMPING:     0.008,
+  BOWL_FORCE_MAX:   0.004,   // baked from debug (was 0.0022)
+  BOWL_DAMPING:     0.002,   // baked from debug (was 0.008)
   BOWL_CENTER_DEAD: 0.08,
 
   // Out of bounds
-  EJECT_RADIUS:     1.02,      // lowered from 1.08 -- less distance for ejected tops to travel
+  EJECT_RADIUS:     1.02,
 
   // Spin
   SPIN_LAUNCH_MAX:  1.0,
@@ -44,8 +44,9 @@ const PHYSICS = {
 
   // Corner strike / ejection
   CORNER_STRIKE_THRESHOLD: 1.5,
-  CORNER_STRIKE_IMPULSE:   14.0,   // raised from 8.0 -- enough to overcome bowl pull
+  CORNER_STRIKE_IMPULSE:   14.0,
   CORNER_STRIKE_CHANCE:    0.55,
+  EJECT_SUPPRESS_FRAMES:   25,   // frames to suppress radial damping after corner strike
 
   // Engine
   FPS:              60,
@@ -62,7 +63,7 @@ let topPhysState = {};
 
 let onTopDied      = null;
 let onCollision    = null;
-let onCornerStrike = null;   // fn(striker, target, force, impulse)
+let onCornerStrike = null;   // fn(striker, target, force, impulse, selfEjected)
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
@@ -87,8 +88,8 @@ function _buildArena() {
 const BODY_PARAMS = {
   friction:    0.03,
   frictionAir: 0.001,
-  restitution: 0.35,
-  colLossMult: 0.08,
+  restitution: 0.30,   // baked from debug (was 0.35)
+  colLossMult: 0.05,   // baked from debug (was 0.08)
   colSustain:  0.06,
 };
 
@@ -113,11 +114,12 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
   instance.launched  = true;
 
   topPhysState[id] = {
-    driftAngle:  Math.random() * Math.PI * 2,
-    stuckFrames: 0,
-    jumpOffset:  0,
-    jumpVel:     0,
-    tickPhase:   0,
+    driftAngle:   Math.random() * Math.PI * 2,
+    stuckFrames:  0,
+    jumpOffset:   0,
+    jumpVel:      0,
+    tickPhase:    0,
+    ejectFrames:  0,   // frames remaining where radial damping is suppressed
   };
 }
 
@@ -165,7 +167,8 @@ function updatePhysics(instances) {
       continue;
     }
 
-    _applyBowlForce(body, dx, dy, dist);
+    // Pass pstate so bowl force can check ejectFrames
+    _applyBowlForce(body, dx, dy, dist, pstate);
 
     if (instance.defId === 'hajiki') {
       _applyHajikiDrift(body, pstate);
@@ -199,14 +202,14 @@ function updatePhysics(instances) {
 
 // ─── Bowl Force ──────────────────────────────────────────────────────────────
 
-function _applyBowlForce(body, dx, dy, dist) {
+function _applyBowlForce(body, dx, dy, dist, pstate) {
   const r        = PHYSICS.ARENA_RADIUS;
   const deadZone = r * PHYSICS.BOWL_CENTER_DEAD;
 
   if (dist < deadZone) return;
 
-  const t      = Math.min(dist / r, 1.0);
-  const slope  = Math.pow(t, 1.5 + PHYSICS.BOWL_TENSION);
+  const t        = Math.min(dist / r, 1.0);
+  const slope    = Math.pow(t, 1.5 + PHYSICS.BOWL_TENSION);
   const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
   const nx = dx / dist;
   const ny = dy / dist;
@@ -215,6 +218,14 @@ function _applyBowlForce(body, dx, dy, dist) {
     x: -nx * forceMag,
     y: -ny * forceMag,
   });
+
+  // Suppress radial damping for EJECT_SUPPRESS_FRAMES after a corner strike.
+  // Without this, the damping term cancels outward velocity faster than the
+  // impulse can carry the top to the boundary.
+  if (pstate && pstate.ejectFrames > 0) {
+    pstate.ejectFrames--;
+    return;
+  }
 
   const vel     = body.velocity;
   const radialV = vel.x * nx + vel.y * ny;
@@ -431,6 +442,11 @@ function _applyDeflection(instance, ownBody, otherBody, force) {
 // Hexagonal tops (nomaru, riki, hajiki) can land corner-on-corner hits that
 // launch one or both tops outward with enough force to overcome bowl pull.
 // Maru has no corners -- can receive a strike but never initiates one.
+//
+// Fix (day 3): after applying the ejection impulse, set ejectFrames on the
+// target's pstate. _applyBowlForce skips radial damping while ejectFrames > 0,
+// preventing the damping term from cancelling outward velocity before the top
+// reaches the boundary.
 
 function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
   if (force < PHYSICS.CORNER_STRIKE_THRESHOLD) return;
@@ -474,6 +490,12 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
     y: (dy / mag) * (impulse + currentSpd * 0.5),
   });
 
+  // Suppress radial damping so the impulse isn't immediately cancelled
+  const targetId = _instanceId(target);
+  if (topPhysState[targetId]) {
+    topPhysState[targetId].ejectFrames = PHYSICS.EJECT_SUPPRESS_FRAMES;
+  }
+
   // Hajiki self-ejection -- 30% chance
   let selfEjected = false;
   if (striker.defId === 'hajiki' && Math.random() < 0.30) {
@@ -482,6 +504,10 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
       x: -(dx / mag) * selfImpulse,
       y: -(dy / mag) * selfImpulse,
     });
+    const strikerId = _instanceId(striker);
+    if (topPhysState[strikerId]) {
+      topPhysState[strikerId].ejectFrames = PHYSICS.EJECT_SUPPRESS_FRAMES;
+    }
     selfEjected = true;
   }
 
