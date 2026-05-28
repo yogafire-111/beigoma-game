@@ -6,29 +6,29 @@
 
 const PHYSICS = {
   // Canvas / arena
-  CANVAS_SIZE:      800,       // px, square canvas
-  ARENA_RADIUS:     340,       // px, bowl rim radius
+  CANVAS_SIZE:      800,
+  ARENA_RADIUS:     340,
 
   // Bowl
-  BOWL_TENSION:     0.5,       // 0 = flat, 1 = steep funnel
-  BOWL_FORCE_MAX:   0.0022,    // inward pull strength
-  BOWL_DAMPING:     0.008,     // radial-only damping -- low enough to preserve spiral
-  BOWL_CENTER_DEAD: 0.08,      // fraction of radius where bowl is flat
+  BOWL_TENSION:     0.5,
+  BOWL_FORCE_MAX:   0.0022,
+  BOWL_DAMPING:     0.008,
+  BOWL_CENTER_DEAD: 0.08,
 
   // Out of bounds
-  EJECT_RADIUS:     1.08,      // fraction of ARENA_RADIUS before top is ejected
+  EJECT_RADIUS:     1.02,      // lowered from 1.08 -- less distance for ejected tops to travel
 
   // Spin
-  SPIN_LAUNCH_MAX:  1.0,       // normalized spin at launch (1.0 = perfect throw)
-  SPIN_DEAD_THRESH: 0.08,      // below this → top starts wobbling
-  SPIN_FALL_THRESH: 0.03,      // below this → top falls and dies
-  SIDE_CONTACT_PENALTY: 0.006, // extra spin loss per frame when sides rub canvas
-  WOBBLE_RATE:      0.012,     // how fast tilt increases once wobbling starts
+  SPIN_LAUNCH_MAX:  1.0,
+  SPIN_DEAD_THRESH: 0.08,
+  SPIN_FALL_THRESH: 0.03,
+  SIDE_CONTACT_PENALTY: 0.006,
+  WOBBLE_RATE:      0.012,
 
   // Collision
-  JUMP_CHANCE:      0.06,      // probability of jump on high-force impact (0–1)
-  JUMP_FORCE_MIN:   0.012,     // minimum impact force to trigger possible jump
-  JUMP_HEIGHT_MAX:  18,        // px of upward visual offset during jump
+  JUMP_CHANCE:      0.06,
+  JUMP_FORCE_MIN:   0.012,
+  JUMP_HEIGHT_MAX:  18,
 
   // Hajiki drift
   HAJIKI_DRIFT_STRENGTH: 0.00018,
@@ -43,9 +43,9 @@ const PHYSICS = {
   FADE_RATE:        0.018,
 
   // Corner strike / ejection
-  CORNER_STRIKE_THRESHOLD: 1.5,   // minimum force to trigger check
-  CORNER_STRIKE_IMPULSE:   8.0,   // base outward velocity -- tune for ejection frequency
-  CORNER_STRIKE_CHANCE:    0.55,  // probability when threshold met (tune toward 40-50% ejection rate)
+  CORNER_STRIKE_THRESHOLD: 1.5,
+  CORNER_STRIKE_IMPULSE:   14.0,   // raised from 8.0 -- enough to overcome bowl pull
+  CORNER_STRIKE_CHANCE:    0.55,
 
   // Engine
   FPS:              60,
@@ -54,20 +54,22 @@ const PHYSICS = {
 
 // ─── Module State ────────────────────────────────────────────────────────────
 
-let engine   = null;
-let world    = null;
+let engine      = null;
+let world       = null;
 let arenaBodies = [];
 let topBodies   = {};
 let topPhysState = {};
 
-let onTopDied     = null;
-let onCollision   = null;
+let onTopDied      = null;
+let onCollision    = null;
+let onCornerStrike = null;   // fn(striker, target, force, impulse)
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 function initPhysics(callbacks) {
-  if (callbacks.onTopDied)   onTopDied   = callbacks.onTopDied;
-  if (callbacks.onCollision) onCollision = callbacks.onCollision;
+  if (callbacks.onTopDied)      onTopDied      = callbacks.onTopDied;
+  if (callbacks.onCollision)    onCollision    = callbacks.onCollision;
+  if (callbacks.onCornerStrike) onCornerStrike = callbacks.onCornerStrike;
 
   engine = Matter.Engine.create({ gravity: { x: 0, y: PHYSICS.GRAVITY_SCALE } });
   world  = engine.world;
@@ -105,8 +107,8 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
   Matter.World.add(world, body);
 
   const id = _instanceId(instance);
-  topBodies[id]    = body;
-  instance.body    = body;
+  topBodies[id]      = body;
+  instance.body      = body;
   instance.spinSpeed = Math.min(spinSpeed, PHYSICS.SPIN_LAUNCH_MAX);
   instance.launched  = true;
 
@@ -141,8 +143,8 @@ function updatePhysics(instances) {
   for (const instance of instances) {
     if (!instance.alive || !instance.launched) continue;
 
-    const id    = _instanceId(instance);
-    const body  = topBodies[id];
+    const id     = _instanceId(instance);
+    const body   = topBodies[id];
     const pstate = topPhysState[id];
     if (!body || !pstate) continue;
 
@@ -152,8 +154,8 @@ function updatePhysics(instances) {
 
     // ── Out of bounds check ──
     if (dist > PHYSICS.ARENA_RADIUS * PHYSICS.EJECT_RADIUS && instance.alive) {
-      instance.alive    = false;
-      instance.ejected  = true;
+      instance.alive   = false;
+      instance.ejected = true;
       Matter.Body.setStatic(body, true);
       if (onTopDied) onTopDied(instance);
     }
@@ -181,7 +183,7 @@ function updatePhysics(instances) {
     _updateJump(pstate);
 
     pstate.tickPhase += instance.spinSpeed * 0.18;
-    instance.angle = body.angle + pstate.tickPhase * 0.5;
+    instance.angle    = body.angle + pstate.tickPhase * 0.5;
 
     if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
       instance.alive = false;
@@ -203,13 +205,12 @@ function _applyBowlForce(body, dx, dy, dist) {
 
   if (dist < deadZone) return;
 
-  const t       = Math.min(dist / r, 1.0);
-  const tension = PHYSICS.BOWL_TENSION;
-  const slope   = Math.pow(t, 1.5 + tension);
-
+  const t      = Math.min(dist / r, 1.0);
+  const slope  = Math.pow(t, 1.5 + PHYSICS.BOWL_TENSION);
   const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
   const nx = dx / dist;
   const ny = dy / dist;
+
   Matter.Body.applyForce(body, body.position, {
     x: -nx * forceMag,
     y: -ny * forceMag,
@@ -332,8 +333,6 @@ function _handleCollisionPairs(pairs, isInitial) {
       _applyCollisionSpinLoss(instB, instA, force, 1.0);
       _applyDeflection(instA, bodyA, bodyB, force);
       _applyDeflection(instB, bodyB, bodyA, force);
-
-      // Corner strike -- potential ejection
       _applyCornerStrike(instA, instB, bodyA, bodyB, force);
 
       if (instA.defId === 'riki' || instB.defId === 'riki') {
@@ -383,9 +382,9 @@ function _applyHexagonImpulse(instA, instB, bodyA, bodyB) {
 // ─── Collision Spin Loss ─────────────────────────────────────────────────────
 
 function _applyCollisionSpinLoss(instance, opponent, force, scale) {
-  const s         = scale !== undefined ? scale : 1.0;
-  const impactMod = opponent.def.impactForce;
-  const massMod   = opponent.def.mass / instance.def.mass;
+  const s             = scale !== undefined ? scale : 1.0;
+  const impactMod     = opponent.def.impactForce;
+  const massMod       = opponent.def.mass / instance.def.mass;
   const deflectAbsorb = 1.0 - (instance.def.deflection * 0.5);
 
   const loss = force * BODY_PARAMS.colLossMult * impactMod * massMod
@@ -434,8 +433,6 @@ function _applyDeflection(instance, ownBody, otherBody, force) {
 // Maru has no corners -- can receive a strike but never initiates one.
 
 function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
-  console.log(`CORNER CHECK force:${force.toFixed(2)}`);
-
   if (force < PHYSICS.CORNER_STRIKE_THRESHOLD) return;
 
   const aCanStrike = instA.defId !== 'maru';
@@ -444,10 +441,8 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
 
   if (Math.random() > PHYSICS.CORNER_STRIKE_CHANCE) return;
 
-  console.log(`CORNER STRIKE force:${force.toFixed(2)} impulse:${(PHYSICS.CORNER_STRIKE_IMPULSE * Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0)).toFixed(2)}`);
-
   const impulseScale = Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0);
-  const impulse = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
+  const impulse      = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
 
   let striker, target, strikerBody, targetBody;
 
@@ -469,8 +464,8 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
     }
   }
 
-  const dx = targetBody.position.x - strikerBody.position.x;
-  const dy = targetBody.position.y - strikerBody.position.y;
+  const dx  = targetBody.position.x - strikerBody.position.x;
+  const dy  = targetBody.position.y - strikerBody.position.y;
   const mag = Math.hypot(dx, dy) || 1;
 
   const currentSpd = Math.hypot(targetBody.velocity.x, targetBody.velocity.y);
@@ -480,13 +475,17 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
   });
 
   // Hajiki self-ejection -- 30% chance
+  let selfEjected = false;
   if (striker.defId === 'hajiki' && Math.random() < 0.30) {
     const selfImpulse = impulse * 0.7;
     Matter.Body.setVelocity(strikerBody, {
       x: -(dx / mag) * selfImpulse,
       y: -(dy / mag) * selfImpulse,
     });
+    selfEjected = true;
   }
+
+  if (onCornerStrike) onCornerStrike(striker, target, force, impulse, selfEjected);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
