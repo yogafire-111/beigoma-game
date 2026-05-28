@@ -14,6 +14,14 @@ const GAME = {
   CPU_AIM_SPREAD_BASE:   0.28,   // base aim error in radians (skill 0)
   CPU_AIM_SPREAD_MIN:    0.04,   // minimum aim error at max skill
 
+  // CPU spin/speed -- matched to same range as player at equivalent skill.
+  // Previously hardcoded to 0.55-0.90 spin / 5.5-7.0 speed, which caused
+  // CPU to consistently enter collisions with lower spin than the player.
+  CPU_SPIN_BASE:         0.70,   // spin at skill 0 (center of player range at low skill)
+  CPU_SPIN_MAX:          1.0,    // spin at skill 100
+  CPU_SPEED_BASE:        5.5,    // launch velocity at skill 0
+  CPU_SPEED_MAX:         7.5,    // launch velocity at skill 100
+
   // Player skill
   SKILL_MIN:             0,
   SKILL_MAX:             100,
@@ -141,7 +149,8 @@ function updateCpuLaunch() {
 function _calculateCpuLaunch() {
   const personality = gameState.cpuPersonality;
   const skill       = gameState.cpuSkill;
-  const aimSpread   = _lerp(GAME.CPU_AIM_SPREAD_BASE, GAME.CPU_AIM_SPREAD_MIN, skill / 100);
+  const skillT      = skill / 100;
+  const aimSpread   = _lerp(GAME.CPU_AIM_SPREAD_BASE, GAME.CPU_AIM_SPREAD_MIN, skillT);
 
   const cx = Physics.PHYSICS.CANVAS_SIZE / 2;
   const cy = Physics.PHYSICS.CANVAS_SIZE / 2;
@@ -170,16 +179,21 @@ function _calculateCpuLaunch() {
 
   // Apply skill-based aim error
   const finalAngle = targetAngle + (Math.random() - 0.5) * aimSpread;
-  const finalSpin  = 0.55 + Math.random() * 0.35; // CPU always gets a decent spin
+
+  // Spin and speed scale with CPU skill, matching the same range a player
+  // would get at equivalent skill. Small random variance added on top.
+  const baseSpin  = _lerp(GAME.CPU_SPIN_BASE, GAME.CPU_SPIN_MAX, skillT);
+  const baseSpeed = _lerp(GAME.CPU_SPEED_BASE, GAME.CPU_SPEED_MAX, skillT);
+  const finalSpin  = Math.min(1.0, baseSpin  + (Math.random() - 0.5) * 0.15);
+  const speed      = baseSpeed + (Math.random() - 0.5) * 0.5;
 
   // CPU launch position: from the rim opposite to aim direction
   const launchX = cx + Math.cos(finalAngle + Math.PI) * (r * 0.72);
   const launchY = cy + Math.sin(finalAngle + Math.PI) * (r * 0.72);
 
   // Velocity toward target
-  const speed = 5.5 + Math.random() * 1.5;
-  const vx    = Math.cos(finalAngle) * speed;
-  const vy    = Math.sin(finalAngle) * speed;
+  const vx = Math.cos(finalAngle) * speed;
+  const vy = Math.sin(finalAngle) * speed;
 
   return {
     x:     launchX,
@@ -267,8 +281,8 @@ function _resolveOneSurvivor(survivor, loser, now) {
 }
 
 function _setResult(result, reason) {
-  gameState.phase       = 'result';
-  gameState.result      = result;
+  gameState.phase        = 'result';
+  gameState.result       = result;
   gameState.resultReason = reason;
 
   // Update player skill/XP
@@ -284,11 +298,11 @@ function freeModeRemoveTop(instance) {
   if (gameState.mode !== GAME.MODE_FREE) return;
   Physics.removeTopFromWorld(instance);
   Physics.unregisterInstance(instance);
-  instance.launched = false;
-  instance.alive    = true;
-  instance.opacity  = 1.0;
+  instance.launched  = false;
+  instance.alive     = true;
+  instance.opacity   = 1.0;
   instance.spinSpeed = 0;
-  instance.tilt     = 0;
+  instance.tilt      = 0;
 }
 
 // ─── Player Skill ────────────────────────────────────────────────────────────
