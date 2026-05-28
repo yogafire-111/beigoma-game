@@ -45,7 +45,7 @@ const PHYSICS = {
   // Corner strike / ejection
   CORNER_STRIKE_THRESHOLD: 1.5,
   CORNER_STRIKE_IMPULSE:   14.0,
-  CORNER_STRIKE_CHANCE:    0.55,
+  CORNER_STRIKE_CHANCE:    0.35,   // lowered from 0.55 to hit 40-50% ejection target
   EJECT_SUPPRESS_FRAMES:   25,   // frames to suppress radial damping after corner strike
 
   // Engine
@@ -457,7 +457,12 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
 
   if (Math.random() > PHYSICS.CORNER_STRIKE_CHANCE) return;
 
-  const impulseScale = Math.min(force / PHYSICS.CORNER_STRIKE_THRESHOLD, 3.0);
+  // Sqrt curve: moderate hits deliver moderate impulse, hard hits approach cap
+  // force=1.5 → scale=1.0 → impulse=14   (threshold hit)
+  // force=3.0 → scale=1.41 → impulse=19.7
+  // force=6.0 → scale=2.0  → impulse=28
+  // force=13.5 → scale=3.0 → impulse=42  (hard cap)
+  const impulseScale = Math.min(Math.sqrt(force / PHYSICS.CORNER_STRIKE_THRESHOLD), 3.0);
   const impulse      = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
 
   let striker, target, strikerBody, targetBody;
