@@ -358,6 +358,11 @@
         <input type="range" id="s-bowl-dead" min="0" max="0.3" step="0.01" />
         <input type="number" class="val" id="v-bowl-dead" step="0.01" />
       </div>
+      <div class="slider-row">
+        <label>LATERAL_DAMP</label>
+        <input type="range" id="s-bowl-lateral" min="0" max="1" step="0.02" />
+        <input type="number" class="val" id="v-bowl-lateral" step="0.02" />
+      </div>
     </div>
   </div>
 
@@ -506,27 +511,28 @@ const DEBUG = {
 // ── Slider definitions ────────────────────────────────────────────────────────
 
 const SLIDERS = [
-  ['s-bowl-force',   'v-bowl-force',   'BOWL_FORCE_MAX',        5],
-  ['s-bowl-damp',    'v-bowl-damp',    'BOWL_DAMPING',          4],
-  ['s-bowl-tension', 'v-bowl-tension', 'BOWL_TENSION',          2],
-  ['s-bowl-dead',    'v-bowl-dead',    'BOWL_CENTER_DEAD',      2],
-  ['s-launch-speed', 'v-launch-speed', 'debug:launchSpeed',     1],
-  ['s-launch-var',   'v-launch-var',   'debug:launchVar',       1],
-  ['s-launch-spread','v-launch-spread','debug:launchSpread',    2],
-  ['s-tip-fine',     'v-tip-fine',     'tip:fine',              5],
-  ['s-tip-round',    'v-tip-round',    'tip:round',             5],
-  ['s-tip-flat',     'v-tip-flat',     'tip:flat',              5],
-  ['s-thresh-wobble','v-thresh-wobble','SPIN_DEAD_THRESH',      3],
-  ['s-thresh-fall',  'v-thresh-fall',  'SPIN_FALL_THRESH',      3],
-  ['s-wobble-rate',  'v-wobble-rate',  'WOBBLE_RATE',           3],
-  ['s-side-penalty', 'v-side-penalty', 'SIDE_CONTACT_PENALTY',  3],
-  ['s-col-loss',     'v-col-loss',     'debug:colLossMult',     3],
-  ['s-col-sustain',  'v-col-sustain',  'debug:colSustain',      2],
-  ['s-restitution',  'v-restitution',  'debug:restitution',     2],
-  ['s-friction',     'v-friction',     'debug:friction',        3],
-  ['s-frictionair',  'v-frictionair',  'debug:frictionAir',     3],
-  ['s-haj-drift',    'v-haj-drift',    'HAJIKI_DRIFT_STRENGTH', 5],
-  ['s-haj-change',   'v-haj-change',   'HAJIKI_DRIFT_CHANGE',   3],
+  ['s-bowl-force',   'v-bowl-force',   'BOWL_FORCE_MAX',          5],
+  ['s-bowl-damp',    'v-bowl-damp',    'BOWL_DAMPING',            4],
+  ['s-bowl-tension', 'v-bowl-tension', 'BOWL_TENSION',            2],
+  ['s-bowl-dead',    'v-bowl-dead',    'BOWL_CENTER_DEAD',        2],
+  ['s-bowl-lateral', 'v-bowl-lateral', 'BOWL_LATERAL_DAMP_RATIO', 2],
+  ['s-launch-speed', 'v-launch-speed', 'debug:launchSpeed',       1],
+  ['s-launch-var',   'v-launch-var',   'debug:launchVar',         1],
+  ['s-launch-spread','v-launch-spread','debug:launchSpread',      2],
+  ['s-tip-fine',     'v-tip-fine',     'tip:fine',                5],
+  ['s-tip-round',    'v-tip-round',    'tip:round',               5],
+  ['s-tip-flat',     'v-tip-flat',     'tip:flat',                5],
+  ['s-thresh-wobble','v-thresh-wobble','SPIN_DEAD_THRESH',        3],
+  ['s-thresh-fall',  'v-thresh-fall',  'SPIN_FALL_THRESH',        3],
+  ['s-wobble-rate',  'v-wobble-rate',  'WOBBLE_RATE',             3],
+  ['s-side-penalty', 'v-side-penalty', 'SIDE_CONTACT_PENALTY',   3],
+  ['s-col-loss',     'v-col-loss',     'debug:colLossMult',       3],
+  ['s-col-sustain',  'v-col-sustain',  'debug:colSustain',        2],
+  ['s-restitution',  'v-restitution',  'debug:restitution',       2],
+  ['s-friction',     'v-friction',     'debug:friction',          3],
+  ['s-frictionair',  'v-frictionair',  'debug:frictionAir',       3],
+  ['s-haj-drift',    'v-haj-drift',    'HAJIKI_DRIFT_STRENGTH',   5],
+  ['s-haj-change',   'v-haj-change',   'HAJIKI_DRIFT_CHANGE',     3],
 ];
 
 function getValue(key) {
@@ -686,16 +692,17 @@ document.getElementById('btn-export').addEventListener('click', () => {
   const lines = [
     '// Bake these into physics.js / main.js\n',
     '// PHYSICS constants:',
-    `BOWL_FORCE_MAX:          ${Physics.PHYSICS.BOWL_FORCE_MAX},`,
-    `BOWL_DAMPING:            ${Physics.PHYSICS.BOWL_DAMPING},`,
-    `BOWL_TENSION:            ${Physics.PHYSICS.BOWL_TENSION},`,
-    `BOWL_CENTER_DEAD:        ${Physics.PHYSICS.BOWL_CENTER_DEAD},`,
-    `SPIN_DEAD_THRESH:        ${Physics.PHYSICS.SPIN_DEAD_THRESH},`,
-    `SPIN_FALL_THRESH:        ${Physics.PHYSICS.SPIN_FALL_THRESH},`,
-    `WOBBLE_RATE:             ${Physics.PHYSICS.WOBBLE_RATE},`,
-    `SIDE_CONTACT_PENALTY:    ${Physics.PHYSICS.SIDE_CONTACT_PENALTY},`,
-    `HAJIKI_DRIFT_STRENGTH:   ${Physics.PHYSICS.HAJIKI_DRIFT_STRENGTH},`,
-    `HAJIKI_DRIFT_CHANGE:     ${Physics.PHYSICS.HAJIKI_DRIFT_CHANGE},`,
+    `BOWL_FORCE_MAX:            ${Physics.PHYSICS.BOWL_FORCE_MAX},`,
+    `BOWL_DAMPING:              ${Physics.PHYSICS.BOWL_DAMPING},`,
+    `BOWL_TENSION:              ${Physics.PHYSICS.BOWL_TENSION},`,
+    `BOWL_CENTER_DEAD:          ${Physics.PHYSICS.BOWL_CENTER_DEAD},`,
+    `BOWL_LATERAL_DAMP_RATIO:   ${Physics.PHYSICS.BOWL_LATERAL_DAMP_RATIO},`,
+    `SPIN_DEAD_THRESH:          ${Physics.PHYSICS.SPIN_DEAD_THRESH},`,
+    `SPIN_FALL_THRESH:          ${Physics.PHYSICS.SPIN_FALL_THRESH},`,
+    `WOBBLE_RATE:               ${Physics.PHYSICS.WOBBLE_RATE},`,
+    `SIDE_CONTACT_PENALTY:      ${Physics.PHYSICS.SIDE_CONTACT_PENALTY},`,
+    `HAJIKI_DRIFT_STRENGTH:     ${Physics.PHYSICS.HAJIKI_DRIFT_STRENGTH},`,
+    `HAJIKI_DRIFT_CHANGE:       ${Physics.PHYSICS.HAJIKI_DRIFT_CHANGE},`,
     '',
     '// TIP_FRICTION:',
     `fine:  ${TIP_FRICTION.fine},`,
@@ -772,7 +779,7 @@ function clearLog() {
 
 function formatLog() {
   const lines = ['=== BEIGOMA DEBUG LOG ==='];
-  lines.push(`Settings: bowlForce=${Physics.PHYSICS.BOWL_FORCE_MAX} damp=${Physics.PHYSICS.BOWL_DAMPING} speed=${DEBUG.launchSpeed} colLoss=${DEBUG.colLossMult} restitution=${DEBUG.restitution}`);
+  lines.push(`Settings: bowlForce=${Physics.PHYSICS.BOWL_FORCE_MAX} damp=${Physics.PHYSICS.BOWL_DAMPING} lateralDamp=${Physics.PHYSICS.BOWL_LATERAL_DAMP_RATIO} speed=${DEBUG.launchSpeed} colLoss=${DEBUG.colLossMult} restitution=${DEBUG.restitution}`);
   lines.push(`Tips: fine=${TIP_FRICTION.fine} round=${TIP_FRICTION.round} flat=${TIP_FRICTION.flat}`);
   lines.push('---');
   eventLog.forEach(e => {
@@ -869,7 +876,7 @@ const _origLaunch = handlePlayerLaunchButton;
 handlePlayerLaunchButton = function() {
   clearLog();
   logEvent('launch', `Player: ${_playerTop} vs CPU: ${_cpuTop}`,
-    `speed:${DEBUG.launchSpeed} bowlF:${Physics.PHYSICS.BOWL_FORCE_MAX} damp:${Physics.PHYSICS.BOWL_DAMPING}`
+    `speed:${DEBUG.launchSpeed} bowlF:${Physics.PHYSICS.BOWL_FORCE_MAX} damp:${Physics.PHYSICS.BOWL_DAMPING} lateralDamp:${Physics.PHYSICS.BOWL_LATERAL_DAMP_RATIO}`
   );
   _origLaunch();
 };
