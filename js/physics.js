@@ -1,890 +1,569 @@
+// physics.js
+// Matter.js world setup, bowl force, spin decay, collision handling
+// Depends on: Matter.js (global), tops.js (window.Tops)
 
+// ─── Tuning Constants ────────────────────────────────────────────────────────
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Beigoma Debug</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+const PHYSICS = {
+  // Canvas / arena
+  CANVAS_SIZE:      800,
+  ARENA_RADIUS:     340,
 
-    body {
-      background: #111;
-      color: #ddd;
-      font-family: monospace;
-      font-size: 12px;
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
-    }
+  // Bowl
+  BOWL_TENSION:          0.5,
+  BOWL_FORCE_MAX:        0.004,   // baked from debug (was 0.0022)
+  BOWL_DAMPING:          0.002,   // baked from debug (was 0.008)
+  BOWL_CENTER_DEAD:      0.08,
+  BOWL_LATERAL_DAMP_RATIO: 0.4,  // tangential damping as fraction of radial damping
 
-    /* ── Arena ── */
-    #arena-wrap {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex: 1;
-      padding: 16px;
-    }
-    #arena {
-      display: block;
-      border-radius: 50%;
-      box-shadow: 0 0 0 3px #2a2620, 0 0 40px rgba(0,0,0,0.8);
-      cursor: crosshair;
-      max-width:  min(800px, calc(100vh - 32px));
-      max-height: min(800px, calc(100vh - 32px));
-      width: 800px;
-      height: 800px;
-    }
+  // Out of bounds
+  EJECT_RADIUS:     1.02,
 
-    /* ── Debug Panel ── */
-    #debug {
-      width: 320px;
-      height: 100vh;
-      background: #1a1a1a;
-      border-left: 1px solid #333;
-      overflow-y: auto;
-      padding: 12px;
-      flex-shrink: 0;
-    }
+  // Spin
+  SPIN_LAUNCH_MAX:  1.0,
+  SPIN_DEAD_THRESH: 0.08,
+  SPIN_FALL_THRESH: 0.03,
+  SIDE_CONTACT_PENALTY: 0.006,
+  WOBBLE_RATE:      0.012,
 
-    #debug h1 {
-      font-size: 13px;
-      color: #f90;
-      margin-bottom: 12px;
-      letter-spacing: 0.1em;
-      border-bottom: 1px solid #333;
-      padding-bottom: 8px;
-    }
+  // Collision
+  JUMP_CHANCE:      0.06,
+  JUMP_FORCE_MIN:   0.012,
+  JUMP_HEIGHT_MAX:  18,
 
-    .section {
-      margin-bottom: 14px;
-      border: 1px solid #2a2a2a;
-      border-radius: 4px;
-      overflow: hidden;
-    }
+  // Hajiki drift
+  HAJIKI_DRIFT_STRENGTH: 0.00018,
+  HAJIKI_DRIFT_CHANGE:   0.018,
 
-    .section-title {
-      background: #222;
-      padding: 5px 8px;
-      color: #f90;
-      font-size: 11px;
-      letter-spacing: 0.08em;
-      cursor: pointer;
-      user-select: none;
-    }
-    .section-title:hover { background: #282828; }
+  // Sharp tip sticking (Riki, Maru)
+  STICK_CHANCE:     0.0006,
+  STICK_RADIUS:     90,
+  STICK_DURATION:   90,
 
-    .section-body {
-      padding: 8px;
-    }
+  // Fade-out
+  FADE_RATE:        0.018,
 
-    .slider-row {
-      display: grid;
-      grid-template-columns: 118px 1fr 72px;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 7px;
-    }
+  // Corner strike / ejection
+  CORNER_STRIKE_THRESHOLD: 1.5,
+  CORNER_STRIKE_IMPULSE:   14.0,
+  CORNER_STRIKE_CHANCE:    0.35,
+  EJECT_SUPPRESS_FRAMES:   25,   // frames to suppress radial damping after corner strike
 
-    .slider-row label {
-      color: #aaa;
-      font-size: 11px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    input[type=range] {
-      width: 100%;
-      accent-color: #f90;
-      cursor: pointer;
-    }
-
-    input[type=number].val {
-      width: 100%;
-      background: #111;
-      border: 1px solid #444;
-      border-radius: 3px;
-      color: #ff0;
-      font-family: monospace;
-      font-size: 11px;
-      padding: 2px 4px;
-      text-align: right;
-      -moz-appearance: textfield;
-    }
-    input[type=number].val:focus {
-      outline: none;
-      border-color: #f90;
-    }
-    input[type=number].val::-webkit-inner-spin-button,
-    input[type=number].val::-webkit-outer-spin-button {
-      opacity: 0.4;
-    }
-
-    /* ── Top selector ── */
-    #top-selector {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-    }
-
-    .top-btn {
-      padding: 5px 10px;
-      background: #222;
-      border: 1px solid #444;
-      color: #ccc;
-      font-family: monospace;
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 3px;
-    }
-    .top-btn:hover { border-color: #f90; color: #f90; }
-    .top-btn.active-player { border-color: #4df; color: #4df; background: #1a2a2a; }
-    .top-btn.active-cpu    { border-color: #f64; color: #f64; background: #2a1a1a; }
-
-    #selector-hint {
-      font-size: 11px;
-      color: #666;
-      margin-bottom: 8px;
-    }
-
-    /* ── Action buttons ── */
-    .action-row {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 10px;
-      flex-wrap: wrap;
-    }
-
-    .btn {
-      padding: 6px 12px;
-      border: 1px solid #444;
-      background: #222;
-      color: #ccc;
-      font-family: monospace;
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 3px;
-      transition: background 0.1s;
-    }
-    .btn:hover { background: #2a2a2a; border-color: #f90; color: #f90; }
-    .btn.primary { background: #2a1f00; border-color: #f90; color: #f90; }
-    .btn.primary:hover { background: #3a2a00; }
-
-    /* ── Status ── */
-    #status {
-      font-size: 11px;
-      color: #666;
-      margin-bottom: 10px;
-      min-height: 16px;
-    }
-    #status.ok  { color: #4f4; }
-    #status.err { color: #f44; }
-
-    /* ── Values export ── */
-    #export-box {
-      background: #0d0d0d;
-      border: 1px solid #333;
-      border-radius: 3px;
-      padding: 8px;
-      font-size: 10px;
-      color: #4f4;
-      white-space: pre;
-      overflow-x: auto;
-      overflow-y: auto;
-      max-height: 220px;
-      margin-top: 8px;
-      display: none;
-    }
-
-    /* ── Spin bars ── */
-    .spin-display {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 10px;
-      align-items: center;
-    }
-    .spin-label { color: #888; width: 60px; }
-    .spin-track {
-      flex: 1;
-      height: 6px;
-      background: #222;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .spin-fill {
-      height: 100%;
-      border-radius: 3px;
-      transition: width 0.1s, background 0.3s;
-    }
-    .spin-num { width: 35px; text-align: right; color: #ff0; }
-
-    #debug::-webkit-scrollbar { width: 4px; }
-    #debug::-webkit-scrollbar-track { background: #1a1a1a; }
-    #debug::-webkit-scrollbar-thumb { background: #333; }
-
-    /* ── Live readout ── */
-    .readout-row {
-      display: grid;
-      grid-template-columns: 48px 1fr 1fr 1fr 1fr;
-      gap: 4px;
-      margin-bottom: 3px;
-      font-size: 10px;
-    }
-    .readout-header { color: #555; margin-bottom: 4px; }
-    .readout-label { color: #888; font-size: 10px; }
-    .readout-val   { color: #cf9; font-size: 10px; text-align: right; }
-
-    /* ── Event log ── */
-    #event-log {
-      max-height: 220px;
-      overflow-y: auto;
-      font-size: 10px;
-      line-height: 1.5;
-    }
-    .log-entry {
-      padding: 2px 0;
-      border-bottom: 1px solid #1e1e1e;
-      display: grid;
-      grid-template-columns: 38px 1fr;
-      gap: 4px;
-    }
-    .log-time  { color: #555; }
-    .log-msg   { color: #aaa; }
-    .log-msg.launch        { color: #4df; }
-    .log-msg.collision     { color: #ff0; }
-    .log-msg.corner-strike { color: #f90; }
-    .log-msg.death         { color: #f64; }
-    .log-msg.result        { color: #4f4; }
-    .log-detail { color: #666; font-size: 9px; grid-column: 2; }
-  </style>
-</head>
-<body>
-
-<div id="arena-wrap">
-  <canvas id="arena"></canvas>
-</div>
-
-<div id="debug">
-  <h1>⚙ BEIGOMA DEBUG</h1>
-
-  <div id="status">Select tops then press Launch</div>
-
-  <!-- Top selection -->
-  <div style="font-size:11px;color:#4df;margin-bottom:4px">PLAYER</div>
-  <div id="top-selector-player" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap"></div>
-  <div style="font-size:11px;color:#f64;margin-bottom:4px">OPPONENT</div>
-  <div id="top-selector-cpu" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>
-
-  <!-- Spin display -->
-  <div class="spin-display">
-    <div class="spin-label" id="p-spin-label">player</div>
-    <div class="spin-track"><div class="spin-fill" id="p-spin-fill"></div></div>
-    <div class="spin-num" id="p-spin-num">—</div>
-  </div>
-  <div class="spin-display">
-    <div class="spin-label" id="c-spin-label">opponent</div>
-    <div class="spin-track"><div class="spin-fill" id="c-spin-fill"></div></div>
-    <div class="spin-num" id="c-spin-num">—</div>
-  </div>
-
-  <!-- Action buttons -->
-  <div class="action-row">
-    <button class="btn primary" id="btn-launch">LAUNCH</button>
-    <button class="btn" id="btn-reset">RESET</button>
-    <button class="btn" id="btn-export">EXPORT VALUES</button>
-    <button class="btn" id="btn-copy-log">COPY LOG</button>
-  </div>
-
-  <div id="export-box"></div>
-
-  <!-- ── Live readout ── -->
-  <div class="section">
-    <div class="section-title">LIVE STATE</div>
-    <div class="section-body" id="live-readout">
-      <div class="readout-row">
-        <span class="readout-label" style="color:#4df">PLAYER</span>
-        <span class="readout-val" id="r-p-pos">—</span>
-        <span class="readout-val" id="r-p-vel">—</span>
-        <span class="readout-val" id="r-p-spin">—</span>
-        <span class="readout-val" id="r-p-tilt">—</span>
-      </div>
-      <div class="readout-row readout-header">
-        <span class="readout-label"></span>
-        <span class="readout-val">pos(x,y)</span>
-        <span class="readout-val">vel</span>
-        <span class="readout-val">spin</span>
-        <span class="readout-val">tilt</span>
-      </div>
-      <div class="readout-row">
-        <span class="readout-label" style="color:#f64">OPPO</span>
-        <span class="readout-val" id="r-c-pos">—</span>
-        <span class="readout-val" id="r-c-vel">—</span>
-        <span class="readout-val" id="r-c-spin">—</span>
-        <span class="readout-val" id="r-c-tilt">—</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── Event log ── -->
-  <div class="section">
-    <div class="section-title">EVENT LOG <span id="log-count" style="color:#666;font-size:10px"></span></div>
-    <div class="section-body">
-      <div id="event-log"></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">BOWL</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>FORCE_MAX</label>
-        <input type="range" id="s-bowl-force" min="0.0001" max="0.006" step="0.0001" />
-        <input type="number" class="val" id="v-bowl-force" step="0.0001" />
-      </div>
-      <div class="slider-row">
-        <label>DAMPING</label>
-        <input type="range" id="s-bowl-damp" min="0" max="0.05" step="0.001" />
-        <input type="number" class="val" id="v-bowl-damp" step="0.001" />
-      </div>
-      <div class="slider-row">
-        <label>TENSION</label>
-        <input type="range" id="s-bowl-tension" min="0" max="2" step="0.05" />
-        <input type="number" class="val" id="v-bowl-tension" step="0.05" />
-      </div>
-      <div class="slider-row">
-        <label>CENTER_DEAD</label>
-        <input type="range" id="s-bowl-dead" min="0" max="0.3" step="0.01" />
-        <input type="number" class="val" id="v-bowl-dead" step="0.01" />
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">LAUNCH</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>Speed</label>
-        <input type="range" id="s-launch-speed" min="1" max="20" step="0.5" />
-        <input type="number" class="val" id="v-launch-speed" step="0.5" />
-      </div>
-      <div class="slider-row">
-        <label>Speed variation</label>
-        <input type="range" id="s-launch-var" min="0" max="5" step="0.1" />
-        <input type="number" class="val" id="v-launch-var" step="0.1" />
-      </div>
-      <div class="slider-row">
-        <label>Angle spread</label>
-        <input type="range" id="s-launch-spread" min="0" max="1" step="0.02" />
-        <input type="number" class="val" id="v-launch-spread" step="0.02" />
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">TIP FRICTION (spin decay)</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>Fine (りき まる)</label>
-        <input type="range" id="s-tip-fine" min="0.00005" max="0.001" step="0.00005" />
-        <input type="number" class="val" id="v-tip-fine" step="0.00005" />
-      </div>
-      <div class="slider-row">
-        <label>Round (のーまる)</label>
-        <input type="range" id="s-tip-round" min="0.00005" max="0.001" step="0.00005" />
-        <input type="number" class="val" id="v-tip-round" step="0.00005" />
-      </div>
-      <div class="slider-row">
-        <label>Flat (はじき)</label>
-        <input type="range" id="s-tip-flat" min="0.00005" max="0.002" step="0.00005" />
-        <input type="number" class="val" id="v-tip-flat" step="0.00005" />
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">SPIN THRESHOLDS</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>Wobble onset</label>
-        <input type="range" id="s-thresh-wobble" min="0.01" max="0.2" step="0.005" />
-        <input type="number" class="val" id="v-thresh-wobble" step="0.005" />
-      </div>
-      <div class="slider-row">
-        <label>Fall / die</label>
-        <input type="range" id="s-thresh-fall" min="0.005" max="0.1" step="0.005" />
-        <input type="number" class="val" id="v-thresh-fall" step="0.005" />
-      </div>
-      <div class="slider-row">
-        <label>Wobble rate</label>
-        <input type="range" id="s-wobble-rate" min="0.001" max="0.05" step="0.001" />
-        <input type="number" class="val" id="v-wobble-rate" step="0.001" />
-      </div>
-      <div class="slider-row">
-        <label>Side contact pen.</label>
-        <input type="range" id="s-side-penalty" min="0" max="0.05" step="0.001" />
-        <input type="number" class="val" id="v-side-penalty" step="0.001" />
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">COLLISIONS</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>Spin loss mult.</label>
-        <input type="range" id="s-col-loss" min="0.001" max="0.2" step="0.001" />
-        <input type="number" class="val" id="v-col-loss" step="0.001" />
-      </div>
-      <div class="slider-row">
-        <label>Sustain loss</label>
-        <input type="range" id="s-col-sustain" min="0" max="0.5" step="0.01" />
-        <input type="number" class="val" id="v-col-sustain" step="0.01" />
-      </div>
-      <div class="slider-row">
-        <label>Restitution</label>
-        <input type="range" id="s-restitution" min="0" max="1" step="0.05" />
-        <input type="number" class="val" id="v-restitution" step="0.05" />
-      </div>
-      <div class="slider-row">
-        <label>Body friction</label>
-        <input type="range" id="s-friction" min="0" max="0.2" step="0.005" />
-        <input type="number" class="val" id="v-friction" step="0.005" />
-      </div>
-      <div class="slider-row">
-        <label>Air friction</label>
-        <input type="range" id="s-frictionair" min="0" max="0.05" step="0.001" />
-        <input type="number" class="val" id="v-frictionair" step="0.001" />
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">HAJIKI</div>
-    <div class="section-body">
-      <div class="slider-row">
-        <label>Drift strength</label>
-        <input type="range" id="s-haj-drift" min="0" max="0.002" step="0.00005" />
-        <input type="number" class="val" id="v-haj-drift" step="0.00005" />
-      </div>
-      <div class="slider-row">
-        <label>Drift change rate</label>
-        <input type="range" id="s-haj-change" min="0" max="0.1" step="0.002" />
-        <input type="number" class="val" id="v-haj-change" step="0.002" />
-      </div>
-    </div>
-  </div>
-
-</div><!-- /debug -->
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-<script src="js/tops.js"></script>
-<script src="js/physics.js"></script>
-<script src="js/game.js"></script>
-<script src="js/main.js"></script>
-
-<script>
-// ── Debug tuning vars ──────────────────────────────────────────────────────────
-
-const DEBUG = {
-  launchSpeed:   7,
-  launchVar:     2,
-  launchSpread:  0.3,
-  get restitution()  { return Physics.BODY_PARAMS.restitution; },
-  set restitution(v) { Physics.BODY_PARAMS.restitution = v; },
-  get friction()     { return Physics.BODY_PARAMS.friction; },
-  set friction(v)    { Physics.BODY_PARAMS.friction = v; },
-  get frictionAir()  { return Physics.BODY_PARAMS.frictionAir; },
-  set frictionAir(v) { Physics.BODY_PARAMS.frictionAir = v; },
-  get colLossMult()  { return Physics.BODY_PARAMS.colLossMult; },
-  set colLossMult(v) { Physics.BODY_PARAMS.colLossMult = v; },
-  get colSustain()   { return Physics.BODY_PARAMS.colSustain; },
-  set colSustain(v)  { Physics.BODY_PARAMS.colSustain = v; },
+  // Engine
+  FPS:              60,
+  GRAVITY_SCALE:    0,
 };
 
-// ── Slider definitions ────────────────────────────────────────────────────────
+// ─── Module State ────────────────────────────────────────────────────────────
 
-const SLIDERS = [
-  ['s-bowl-force',   'v-bowl-force',   'BOWL_FORCE_MAX',        5],
-  ['s-bowl-damp',    'v-bowl-damp',    'BOWL_DAMPING',          4],
-  ['s-bowl-tension', 'v-bowl-tension', 'BOWL_TENSION',          2],
-  ['s-bowl-dead',    'v-bowl-dead',    'BOWL_CENTER_DEAD',      2],
-  ['s-launch-speed', 'v-launch-speed', 'debug:launchSpeed',     1],
-  ['s-launch-var',   'v-launch-var',   'debug:launchVar',       1],
-  ['s-launch-spread','v-launch-spread','debug:launchSpread',    2],
-  ['s-tip-fine',     'v-tip-fine',     'tip:fine',              5],
-  ['s-tip-round',    'v-tip-round',    'tip:round',             5],
-  ['s-tip-flat',     'v-tip-flat',     'tip:flat',              5],
-  ['s-thresh-wobble','v-thresh-wobble','SPIN_DEAD_THRESH',      3],
-  ['s-thresh-fall',  'v-thresh-fall',  'SPIN_FALL_THRESH',      3],
-  ['s-wobble-rate',  'v-wobble-rate',  'WOBBLE_RATE',           3],
-  ['s-side-penalty', 'v-side-penalty', 'SIDE_CONTACT_PENALTY',  3],
-  ['s-col-loss',     'v-col-loss',     'debug:colLossMult',     3],
-  ['s-col-sustain',  'v-col-sustain',  'debug:colSustain',      2],
-  ['s-restitution',  'v-restitution',  'debug:restitution',     2],
-  ['s-friction',     'v-friction',     'debug:friction',        3],
-  ['s-frictionair',  'v-frictionair',  'debug:frictionAir',     3],
-  ['s-haj-drift',    'v-haj-drift',    'HAJIKI_DRIFT_STRENGTH', 5],
-  ['s-haj-change',   'v-haj-change',   'HAJIKI_DRIFT_CHANGE',   3],
-];
+let engine      = null;
+let world       = null;
+let arenaBodies = [];
+let topBodies   = {};
+let topPhysState = {};
 
-function getValue(key) {
-  if (key.startsWith('debug:'))  return DEBUG[key.slice(6)];
-  if (key.startsWith('tip:'))    return TIP_FRICTION[key.slice(4)];
-  return Physics.PHYSICS[key];
+let onTopDied      = null;
+let onCollision    = null;
+let onCornerStrike = null;   // fn(striker, target, force, impulse, selfEjected)
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+
+function initPhysics(callbacks) {
+  if (callbacks.onTopDied)      onTopDied      = callbacks.onTopDied;
+  if (callbacks.onCollision)    onCollision    = callbacks.onCollision;
+  if (callbacks.onCornerStrike) onCornerStrike = callbacks.onCornerStrike;
+
+  engine = Matter.Engine.create({ gravity: { x: 0, y: PHYSICS.GRAVITY_SCALE } });
+  world  = engine.world;
+
+  _buildArena();
+  _attachCollisionHandler();
 }
 
-function setValue(key, val) {
-  if (key.startsWith('debug:')) { DEBUG[key.slice(6)] = val; return; }
-  if (key.startsWith('tip:'))   { TIP_FRICTION[key.slice(4)] = val; return; }
-  Physics.PHYSICS[key] = val;
+function _buildArena() {
+  arenaBodies = [];
 }
 
-function initSliders() {
-  SLIDERS.forEach(([sid, vid, key, dec]) => {
-    const slider = document.getElementById(sid);
-    const numEl  = document.getElementById(vid);
-    if (!slider || !numEl) return;
+// ─── Add / Remove Tops ───────────────────────────────────────────────────────
 
-    const current = getValue(key);
-    slider.value  = current;
-    numEl.value   = current.toFixed(dec);
+const BODY_PARAMS = {
+  friction:    0.03,
+  frictionAir: 0.001,
+  restitution: 0.30,   // baked from debug (was 0.35)
+  colLossMult: 0.05,   // baked from debug (was 0.08)
+  colSustain:  0.06,
+};
 
-    slider.addEventListener('input', () => {
-      const v = parseFloat(slider.value);
-      setValue(key, v);
-      numEl.value = v.toFixed(dec);
-    });
+function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
+  const def = instance.def;
 
-    const applyNum = () => {
-      let v = parseFloat(numEl.value);
-      if (isNaN(v)) return;
-      const min = parseFloat(slider.min);
-      const max = parseFloat(slider.max);
-      v = Math.max(min, Math.min(max, v));
-      setValue(key, v);
-      slider.value = v;
-      numEl.value  = v.toFixed(dec);
-    };
-    numEl.addEventListener('change', applyNum);
-    numEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyNum(); });
+  const body = Matter.Bodies.circle(x, y, def.radius, {
+    mass:        def.mass * 2.5,
+    friction:    BODY_PARAMS.friction,
+    frictionAir: BODY_PARAMS.frictionAir,
+    restitution: BODY_PARAMS.restitution,
+    label:       instance.defId,
   });
-}
 
-// ── Top selector ──────────────────────────────────────────────────────────────
+  Matter.Body.setVelocity(body, { x: vx, y: vy });
+  Matter.World.add(world, body);
 
-let _playerTop = 'nomaru';
-let _cpuTop    = 'hajiki';
+  const id = _instanceId(instance);
+  topBodies[id]      = body;
+  instance.body      = body;
+  instance.spinSpeed = Math.min(spinSpeed, PHYSICS.SPIN_LAUNCH_MAX);
+  instance.launched  = true;
 
-function buildTopSelector() {
-  _buildGrid('top-selector-player', false);
-  _buildGrid('top-selector-cpu', true);
-}
-
-function _buildGrid(containerId, isCpu) {
-  const wrap = document.getElementById(containerId);
-  if (!wrap) return;
-  wrap.innerHTML = '';
-  Tops.TOP_ORDER.forEach(id => {
-    const def = Tops.TOP_DEFS[id];
-    const btn = document.createElement('button');
-    btn.className   = 'top-btn';
-    btn.textContent = def.hiragana;
-    btn.dataset.id  = id;
-    btn.addEventListener('click', () => {
-      if (isCpu) { _cpuTop = id; }
-      else       { _playerTop = id; }
-      updateTopBtnStates();
-    });
-    wrap.appendChild(btn);
-  });
-  updateTopBtnStates();
-}
-
-function updateTopBtnStates() {
-  document.querySelectorAll('#top-selector-player .top-btn').forEach(btn => {
-    btn.classList.remove('active-player');
-    if (btn.dataset.id === _playerTop) btn.classList.add('active-player');
-  });
-  document.querySelectorAll('#top-selector-cpu .top-btn').forEach(btn => {
-    btn.classList.remove('active-cpu');
-    if (btn.dataset.id === _cpuTop) btn.classList.add('active-cpu');
-  });
-}
-
-// ── Launch ────────────────────────────────────────────────────────────────────
-
-function handlePlayerLaunchButton() {
-  const gs = Game.getGameState();
-  if (gs.phase !== 'player_launch') return;
-
-  const lateralOffset = (Math.random() - 0.5) * PHYSICS.ARENA_RADIUS * 0.6;
-  const pos = {
-    x: 400 + lateralOffset,
-    y: 400 + 340 * 0.78
+  topPhysState[id] = {
+    driftAngle:   Math.random() * Math.PI * 2,
+    stuckFrames:  0,
+    jumpOffset:   0,
+    jumpVel:      0,
+    tickPhase:    0,
+    ejectFrames:  0,   // frames remaining where radial damping is suppressed
   };
-
-  const spread   = (Math.random() - 0.5) * DEBUG.launchSpread;
-  const aimAngle = -Math.PI / 2 + spread;
-
-  const result = Game.playerLaunch(aimAngle, 0.88);
-  if (!result) return;
-
-  const speed = DEBUG.launchSpeed + Math.random() * DEBUG.launchVar;
-  Physics.addTopToWorld(
-    gs.playerTop,
-    pos.x, pos.y,
-    Math.cos(result.angle) * speed,
-    Math.sin(result.angle) * speed,
-    result.spin
-  );
-  setStatus('Player launched', 'ok');
 }
 
-function showTopSelection(callback) {
-  callback(_playerTop, _cpuTop);
-}
-
-// ── Spin bars ─────────────────────────────────────────────────────────────────
-
-function updateDebugSpinBars() {
-  const gs = Game.getGameState();
-
-  const updateBar = (inst, fillId, numId, labelId) => {
-    const fill = document.getElementById(fillId);
-    const num  = document.getElementById(numId);
-    const lbl  = document.getElementById(labelId);
-    if (!inst) return;
-    if (lbl) lbl.textContent = inst.def.hiragana;
-    const pct = Math.round((inst.spinSpeed || 0) * 100);
-    const col = pct > 50 ? '#4f4' : pct > 20 ? '#ff0' : '#f64';
-    if (fill) { fill.style.width = pct + '%'; fill.style.background = col; }
-    if (num)  num.textContent = pct + '%';
-  };
-
-  updateBar(gs.playerTop, 'p-spin-fill', 'p-spin-num', 'p-spin-label');
-  updateBar(gs.cpuTop,    'c-spin-fill', 'c-spin-num', 'c-spin-label');
-
-  requestAnimationFrame(updateDebugSpinBars);
-}
-
-// ── Status ────────────────────────────────────────────────────────────────────
-
-function setStatus(msg, type) {
-  const el = document.getElementById('status');
-  el.textContent = msg;
-  el.className   = type || '';
-}
-
-// ── Export values ─────────────────────────────────────────────────────────────
-
-document.getElementById('btn-export').addEventListener('click', () => {
-  const box = document.getElementById('export-box');
-  box.style.display = 'block';
-
-  const lines = [
-    '// Bake these into physics.js / main.js\n',
-    '// PHYSICS constants:',
-    `BOWL_FORCE_MAX:          ${Physics.PHYSICS.BOWL_FORCE_MAX},`,
-    `BOWL_DAMPING:            ${Physics.PHYSICS.BOWL_DAMPING},`,
-    `BOWL_TENSION:            ${Physics.PHYSICS.BOWL_TENSION},`,
-    `BOWL_CENTER_DEAD:        ${Physics.PHYSICS.BOWL_CENTER_DEAD},`,
-    `SPIN_DEAD_THRESH:        ${Physics.PHYSICS.SPIN_DEAD_THRESH},`,
-    `SPIN_FALL_THRESH:        ${Physics.PHYSICS.SPIN_FALL_THRESH},`,
-    `WOBBLE_RATE:             ${Physics.PHYSICS.WOBBLE_RATE},`,
-    `SIDE_CONTACT_PENALTY:    ${Physics.PHYSICS.SIDE_CONTACT_PENALTY},`,
-    `HAJIKI_DRIFT_STRENGTH:   ${Physics.PHYSICS.HAJIKI_DRIFT_STRENGTH},`,
-    `HAJIKI_DRIFT_CHANGE:     ${Physics.PHYSICS.HAJIKI_DRIFT_CHANGE},`,
-    '',
-    '// TIP_FRICTION:',
-    `fine:  ${TIP_FRICTION.fine},`,
-    `round: ${TIP_FRICTION.round},`,
-    `flat:  ${TIP_FRICTION.flat},`,
-    '',
-    '// Launch / body:',
-    `launchSpeed:  ${DEBUG.launchSpeed},`,
-    `launchVar:    ${DEBUG.launchVar},`,
-    `launchSpread: ${DEBUG.launchSpread},`,
-    `restitution:  ${DEBUG.restitution},`,
-    `friction:     ${DEBUG.friction},`,
-    `frictionAir:  ${DEBUG.frictionAir},`,
-    '',
-    '// Collision:',
-    `colLossMult:  ${DEBUG.colLossMult},`,
-    `colSustain:   ${DEBUG.colSustain},`,
-  ];
-
-  box.textContent = lines.join('\n');
-});
-
-// ── Reset ─────────────────────────────────────────────────────────────────────
-
-document.getElementById('btn-reset').addEventListener('click', () => {
-  const gs = Game.getGameState();
-  if (gs.result) {
-    logEvent('result', gs.result.replace('_', ' '), `reason:${gs.resultReason}`);
+function removeTopFromWorld(instance) {
+  const id   = _instanceId(instance);
+  const body = topBodies[id];
+  if (body) {
+    Matter.World.remove(world, body);
+    delete topBodies[id];
+    delete topPhysState[id];
   }
-  initGame();
-  clearLog();
-  setStatus('Reset. Select tops and launch.', '');
-  document.getElementById('export-box').style.display = 'none';
-});
-
-document.getElementById('btn-launch').addEventListener('click', () => {
-  handlePlayerLaunchButton();
-});
-
-// ── Event log ─────────────────────────────────────────────────────────────────
-
-const eventLog = [];
-let matchStartTime = null;
-
-function logEvent(type, msg, detail) {
-  const t     = matchStartTime ? ((Date.now() - matchStartTime) / 1000).toFixed(2) : '0.00';
-  const entry = { t, type, msg, detail: detail || '' };
-  eventLog.push(entry);
-
-  const logEl = document.getElementById('event-log');
-  if (!logEl) return;
-
-  const row = document.createElement('div');
-  row.className = 'log-entry';
-  row.innerHTML = `
-    <span class="log-time">${t}s</span>
-    <span class="log-msg ${type}">${msg}</span>
-    ${detail ? `<span class="log-detail">${detail}</span>` : ''}
-  `;
-  logEl.insertBefore(row, logEl.firstChild);
-
-  const countEl = document.getElementById('log-count');
-  if (countEl) countEl.textContent = `(${eventLog.length})`;
+  instance.body = null;
 }
 
-function clearLog() {
-  eventLog.length = 0;
-  const logEl = document.getElementById('event-log');
-  if (logEl) logEl.innerHTML = '';
-  const countEl = document.getElementById('log-count');
-  if (countEl) countEl.textContent = '';
-  matchStartTime = Date.now();
+// ─── Per-Frame Update ────────────────────────────────────────────────────────
+
+function updatePhysics(instances) {
+  Matter.Engine.update(engine, 1000 / PHYSICS.FPS);
+
+  const cx = PHYSICS.CANVAS_SIZE / 2;
+  const cy = PHYSICS.CANVAS_SIZE / 2;
+
+  for (const instance of instances) {
+    if (!instance.alive || !instance.launched) continue;
+
+    const id     = _instanceId(instance);
+    const body   = topBodies[id];
+    const pstate = topPhysState[id];
+    if (!body || !pstate) continue;
+
+    const dx   = body.position.x - cx;
+    const dy   = body.position.y - cy;
+    const dist = Math.hypot(dx, dy);
+
+    // ── Out of bounds check ──
+    if (dist > PHYSICS.ARENA_RADIUS * PHYSICS.EJECT_RADIUS && instance.alive) {
+      instance.alive   = false;
+      instance.ejected = true;
+      Matter.Body.setStatic(body, true);
+      if (onTopDied) onTopDied(instance);
+    }
+
+    if (!instance.alive) {
+      instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
+      continue;
+    }
+
+    // Pass pstate so bowl force can check ejectFrames
+    _applyBowlForce(body, dx, dy, dist, pstate);
+
+    if (instance.defId === 'hajiki') {
+      _applyHajikiDrift(body, pstate);
+    }
+
+    if (instance.def.tipType === 'fine' && pstate.stuckFrames <= 0) {
+      _checkSticking(body, pstate, dist, instance.spinSpeed);
+    }
+    if (pstate.stuckFrames > 0) {
+      Matter.Body.setVelocity(body, { x: 0, y: 0 });
+      pstate.stuckFrames--;
+    }
+
+    _updateSpinDecay(instance, body, dist);
+    _updateJump(pstate);
+
+    pstate.tickPhase += instance.spinSpeed * 0.18;
+    instance.angle    = body.angle + pstate.tickPhase * 0.5;
+
+    if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
+      instance.alive = false;
+      if (body) Matter.Body.setStatic(body, true);
+      if (onTopDied) onTopDied(instance);
+    }
+
+    if (!instance.alive) {
+      instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
+    }
+  }
 }
 
-function formatLog() {
-  const lines = ['=== BEIGOMA DEBUG LOG ==='];
-  lines.push(`Settings: bowlForce=${Physics.PHYSICS.BOWL_FORCE_MAX} damp=${Physics.PHYSICS.BOWL_DAMPING} speed=${DEBUG.launchSpeed} colLoss=${DEBUG.colLossMult} restitution=${DEBUG.restitution}`);
-  lines.push(`Tips: fine=${TIP_FRICTION.fine} round=${TIP_FRICTION.round} flat=${TIP_FRICTION.flat}`);
-  lines.push('---');
-  eventLog.forEach(e => {
-    lines.push(`[${e.t}s] ${e.type.toUpperCase()} ${e.msg} ${e.detail}`);
+// ─── Bowl Force ──────────────────────────────────────────────────────────────
+
+function _applyBowlForce(body, dx, dy, dist, pstate) {
+  const r        = PHYSICS.ARENA_RADIUS;
+  const deadZone = r * PHYSICS.BOWL_CENTER_DEAD;
+
+  if (dist < deadZone) return;
+
+  const t        = Math.min(dist / r, 1.0);
+  const slope    = Math.pow(t, 1.5 + PHYSICS.BOWL_TENSION);
+  const forceMag = slope * PHYSICS.BOWL_FORCE_MAX * body.mass;
+  const nx = dx / dist;
+  const ny = dy / dist;
+
+  Matter.Body.applyForce(body, body.position, {
+    x: -nx * forceMag,
+    y: -ny * forceMag,
   });
-  return lines.join('\n');
-}
 
-document.getElementById('btn-copy-log').addEventListener('click', () => {
-  const text = formatLog();
-  navigator.clipboard.writeText(text).then(() => {
-    setStatus('Log copied to clipboard', 'ok');
-  }).catch(() => {
-    const box = document.getElementById('export-box');
-    box.style.display = 'block';
-    box.textContent   = text;
-    setStatus('Log shown below (copy manually)', '');
-  });
-});
-
-// ── Live state readout ────────────────────────────────────────────────────────
-
-function updateLiveReadout() {
-  const gs = Game.getGameState();
-  _updateTopReadout(gs.playerTop, 'r-p-pos', 'r-p-vel', 'r-p-spin', 'r-p-tilt');
-  _updateTopReadout(gs.cpuTop,    'r-c-pos', 'r-c-vel', 'r-c-spin', 'r-c-tilt');
-  requestAnimationFrame(updateLiveReadout);
-}
-
-function _updateTopReadout(inst, posId, velId, spinId, tiltId) {
-  const pos  = document.getElementById(posId);
-  const vel  = document.getElementById(velId);
-  const spin = document.getElementById(spinId);
-  const tilt = document.getElementById(tiltId);
-  if (!inst || !inst.body) {
-    if (pos) pos.textContent = '—';
+  // Suppress radial damping for EJECT_SUPPRESS_FRAMES after a corner strike.
+  if (pstate && pstate.ejectFrames > 0) {
+    pstate.ejectFrames--;
     return;
   }
-  const b  = inst.body;
-  const cx = Physics.PHYSICS.CANVAS_SIZE / 2;
-  const cy = Physics.PHYSICS.CANVAS_SIZE / 2;
-  const dx = b.position.x - cx;
-  const dy = b.position.y - cy;
 
-  if (pos)  pos.textContent  = `${Math.hypot(dx, dy).toFixed(0)}px`;
-  if (vel)  vel.textContent  = Math.hypot(b.velocity.x, b.velocity.y).toFixed(2);
-  if (spin) spin.textContent = (inst.spinSpeed || 0).toFixed(3);
-  if (tilt) tilt.textContent = (inst.tilt || 0).toFixed(2);
-}
+  const vel     = body.velocity;
+  const radialV = vel.x * nx + vel.y * ny;
+  Matter.Body.applyForce(body, body.position, {
+    x: -nx * radialV * PHYSICS.BOWL_DAMPING * body.mass,
+    y: -ny * radialV * PHYSICS.BOWL_DAMPING * body.mass,
+  });
 
-// ── Log hooks ─────────────────────────────────────────────────────────────────
-
-function installLogHooks() {
-  Physics.initPhysics({
-    onTopDied: (instance) => {
-      const cause = instance.ejected     ? 'EJECTED'
-                  : instance.sideContact ? 'side-contact'
-                  : 'spin-decay';
-      logEvent('death',
-        `${instance.owner} (${instance.def.hiragana}) died`,
-        `cause:${cause} finalSpin:${(instance.spinSpeed||0).toFixed(4)}`
-      );
-    },
-    onCollision: (instA, instB, force) => {
-      if (instA.body && instB.body) {
-        const mx = (instA.body.position.x + instB.body.position.x) / 2;
-        const my = (instA.body.position.y + instB.body.position.y) / 2;
-        const normForce = Math.min(force / 10, 1.0);
-        spawnSparks(mx, my, normForce);
-        triggerImpact(mx, my, normForce);
-      }
-      const spinA = (instA.spinSpeed || 0).toFixed(3);
-      const spinB = (instB.spinSpeed || 0).toFixed(3);
-      const velA  = instA.body ? Math.hypot(instA.body.velocity.x, instA.body.velocity.y).toFixed(2) : '?';
-      const velB  = instB.body ? Math.hypot(instB.body.velocity.x, instB.body.velocity.y).toFixed(2) : '?';
-      logEvent('collision',
-        `${instA.def.hiragana} ✕ ${instB.def.hiragana}`,
-        `force:${force.toFixed(2)} spins:${spinA}/${spinB} vels:${velA}/${velB}`
-      );
-    },
-    onCornerStrike: (striker, target, force, impulse, selfEjected) => {
-      const selfNote = selfEjected ? ' self-ejected!' : '';
-      logEvent('corner-strike',
-        `⚡ ${striker.def.hiragana} → ${target.def.hiragana}${selfNote}`,
-        `force:${force.toFixed(2)} impulse:${impulse.toFixed(1)}`
-      );
-    },
+  // Lateral (tangential) damping -- reduces sideways sliding.
+  // Applied outside the ejectFrames guard so it doesn't fight the ejection impulse.
+  const tangV = vel.x * (-ny) + vel.y * nx;
+  Matter.Body.applyForce(body, body.position, {
+    x:  ny * tangV * PHYSICS.BOWL_DAMPING * PHYSICS.BOWL_LATERAL_DAMP_RATIO * body.mass,
+    y: -nx * tangV * PHYSICS.BOWL_DAMPING * PHYSICS.BOWL_LATERAL_DAMP_RATIO * body.mass,
   });
 }
 
-// ── Patch launch to log ───────────────────────────────────────────────────────
+// ─── Hajiki Drift ────────────────────────────────────────────────────────────
 
-const _origLaunch = handlePlayerLaunchButton;
-handlePlayerLaunchButton = function() {
-  clearLog();
-  logEvent('launch', `Player: ${_playerTop} vs CPU: ${_cpuTop}`,
-    `speed:${DEBUG.launchSpeed} bowlF:${Physics.PHYSICS.BOWL_FORCE_MAX} damp:${Physics.PHYSICS.BOWL_DAMPING}`
-  );
-  _origLaunch();
+function _applyHajikiDrift(body, pstate) {
+  if (Math.random() < PHYSICS.HAJIKI_DRIFT_CHANGE) {
+    pstate.driftAngle += (Math.random() - 0.5) * Math.PI * 0.9;
+  }
+  const strength = PHYSICS.HAJIKI_DRIFT_STRENGTH * body.mass;
+  Matter.Body.applyForce(body, body.position, {
+    x: Math.cos(pstate.driftAngle) * strength,
+    y: Math.sin(pstate.driftAngle) * strength,
+  });
+}
+
+// ─── Sharp Tip Sticking ──────────────────────────────────────────────────────
+
+function _checkSticking(body, pstate, dist, spinSpeed) {
+  if (dist > PHYSICS.STICK_RADIUS) return;
+  const chance = PHYSICS.STICK_CHANCE * (1.2 - spinSpeed);
+  if (Math.random() < chance) {
+    pstate.stuckFrames = PHYSICS.STICK_DURATION;
+  }
+}
+
+// ─── Spin Decay ──────────────────────────────────────────────────────────────
+
+const TIP_FRICTION = {
+  fine:  0.000120,
+  round: 0.000195,
+  flat:  0.000380,
 };
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+function _updateSpinDecay(instance, body, dist) {
+  const def = instance.def;
 
-window.addEventListener('load', () => {
-  initSliders();
-  buildTopSelector();
-  updateDebugSpinBars();
-  updateLiveReadout();
-  installLogHooks();
-  setStatus('Ready. Select tops and launch.', '');
-});
-</script>
-</body>
-</html>
+  const tipFriction  = TIP_FRICTION[def.tipType] || TIP_FRICTION.round;
+  const massPressure = 0.85 + def.mass * 0.18;
+  const alignFactor  = 1.9 - instance.alignment;
+
+  let decay = tipFriction * massPressure * alignFactor;
+
+  if (instance.tilt > 0.6 || instance.sideContact) {
+    const tiltFactor = Math.max(0, instance.tilt - 0.6) / 0.4;
+    decay += PHYSICS.SIDE_CONTACT_PENALTY * tiltFactor * 3;
+    instance.sideContact = instance.tilt > 0.75;
+  } else {
+    instance.sideContact = false;
+  }
+
+  instance.spinSpeed = Math.max(0, instance.spinSpeed - decay);
+
+  if (instance.spinSpeed < PHYSICS.SPIN_DEAD_THRESH) {
+    instance.tilt = Math.min(1.0, instance.tilt + PHYSICS.WOBBLE_RATE);
+  } else {
+    instance.tilt = Math.max(0, instance.tilt - 0.004);
+  }
+}
+
+// ─── Jump ────────────────────────────────────────────────────────────────────
+
+function _updateJump(pstate) {
+  if (pstate.jumpOffset > 0 || pstate.jumpVel > 0) {
+    pstate.jumpOffset += pstate.jumpVel;
+    pstate.jumpVel    -= 1.1;
+    if (pstate.jumpOffset <= 0) {
+      pstate.jumpOffset = 0;
+      pstate.jumpVel    = 0;
+    }
+  }
+}
+
+function _triggerJump(pstate) {
+  if (pstate.jumpOffset > 0) return;
+  pstate.jumpVel = 6 + Math.random() * 6;
+}
+
+// ─── Collision Handler ───────────────────────────────────────────────────────
+
+function _attachCollisionHandler() {
+  Matter.Events.on(engine, 'collisionStart', (event) => {
+    _handleCollisionPairs(event.pairs, true);
+  });
+
+  Matter.Events.on(engine, 'collisionActive', (event) => {
+    _handleCollisionPairs(event.pairs, false);
+  });
+}
+
+function _handleCollisionPairs(pairs, isInitial) {
+  for (const pair of pairs) {
+    const { bodyA, bodyB } = pair;
+    if (bodyA.label === 'arena_wall' || bodyB.label === 'arena_wall') continue;
+
+    const instA = _findInstanceByBody(bodyA);
+    const instB = _findInstanceByBody(bodyB);
+    if (!instA || !instB) continue;
+    if (!instA.alive || !instB.alive) continue;
+
+    const rvx   = bodyA.velocity.x - bodyB.velocity.x;
+    const rvy   = bodyA.velocity.y - bodyB.velocity.y;
+    const force = Math.hypot(rvx, rvy);
+
+    instA.hasContacted = true;
+    instB.hasContacted = true;
+
+    if (isInitial) {
+      _applyCollisionSpinLoss(instA, instB, force, 1.0);
+      _applyCollisionSpinLoss(instB, instA, force, 1.0);
+      _applyDeflection(instA, bodyA, bodyB, force);
+      _applyDeflection(instB, bodyB, bodyA, force);
+      _applyCornerStrike(instA, instB, bodyA, bodyB, force);
+
+      if (instA.defId === 'riki' || instB.defId === 'riki') {
+        _applyHexagonImpulse(instA, instB, bodyA, bodyB);
+      }
+
+      if (force > PHYSICS.JUMP_FORCE_MIN && Math.random() < PHYSICS.JUMP_CHANCE) {
+        const pA = topPhysState[_instanceId(instA)];
+        const pB = topPhysState[_instanceId(instB)];
+        if (pA) _triggerJump(pA);
+        if (pB && Math.random() < 0.4) _triggerJump(pB);
+      }
+
+      if (onCollision) onCollision(instA, instB, force);
+
+    } else {
+      if (force < 1.5) {
+        _applyCollisionSpinLoss(instA, instB, 0.4, BODY_PARAMS.colSustain);
+        _applyCollisionSpinLoss(instB, instA, 0.4, BODY_PARAMS.colSustain);
+      }
+    }
+  }
+}
+
+// ─── Hexagon Impulse ─────────────────────────────────────────────────────────
+
+function _applyHexagonImpulse(instA, instB, bodyA, bodyB) {
+  const rikiInst  = instA.defId === 'riki' ? instA : instB;
+  const rikiBody  = instA.defId === 'riki' ? bodyA : bodyB;
+  const otherBody = instA.defId === 'riki' ? bodyB : bodyA;
+  const otherInst = instA.defId === 'riki' ? instB : instA;
+
+  const phase = rikiBody.angle % (Math.PI / 3);
+  if (phase < 0.15) {
+    const awayX = otherBody.position.x - rikiBody.position.x;
+    const awayY = otherBody.position.y - rikiBody.position.y;
+    const mag   = Math.hypot(awayX, awayY) || 1;
+    const impulse = 0.008 * rikiInst.spinSpeed;
+    Matter.Body.applyForce(otherBody, otherBody.position, {
+      x: (awayX / mag) * impulse,
+      y: (awayY / mag) * impulse,
+    });
+    otherInst.spinSpeed = Math.max(0, otherInst.spinSpeed - 0.025 * rikiInst.spinSpeed);
+  }
+}
+
+// ─── Collision Spin Loss ─────────────────────────────────────────────────────
+
+function _applyCollisionSpinLoss(instance, opponent, force, scale) {
+  const s             = scale !== undefined ? scale : 1.0;
+  const impactMod     = opponent.def.impactForce;
+  const massMod       = opponent.def.mass / instance.def.mass;
+  const deflectAbsorb = 1.0 - (instance.def.deflection * 0.5);
+
+  const loss = force * BODY_PARAMS.colLossMult * impactMod * massMod
+             * (1.1 - instance.def.stability) * deflectAbsorb * s;
+  instance.spinSpeed = Math.max(0, instance.spinSpeed - loss);
+
+  const tipThreshold = 0.8 * instance.def.stability;
+  if (force * impactMod > tipThreshold) {
+    const excess = (force * impactMod - tipThreshold) / tipThreshold;
+    instance.tilt = Math.min(1.0, instance.tilt + excess * 0.04);
+  }
+}
+
+// ─── Deflection ──────────────────────────────────────────────────────────────
+
+function _applyDeflection(instance, ownBody, otherBody, force) {
+  const dvx = ownBody.velocity.x;
+  const dvy = ownBody.velocity.y;
+
+  if (instance.defId === 'maru') {
+    const awayX = ownBody.position.x - otherBody.position.x;
+    const awayY = ownBody.position.y - otherBody.position.y;
+    const mag   = Math.hypot(awayX, awayY) || 1;
+    const spd   = Math.hypot(dvx, dvy);
+    Matter.Body.setVelocity(ownBody, {
+      x: (awayX / mag) * spd * 0.85,
+      y: (awayY / mag) * spd * 0.85,
+    });
+
+  } else if (instance.defId === 'hajiki') {
+    const randAngle = Math.random() * Math.PI * 2;
+    const spd       = Math.hypot(dvx, dvy);
+    const keep      = 0.5 + Math.random() * 0.3;
+    Matter.Body.setVelocity(ownBody, {
+      x: Math.cos(randAngle) * spd * keep,
+      y: Math.sin(randAngle) * spd * keep,
+    });
+  }
+  // nomaru / riki: standard Matter.js response
+}
+
+// ─── Corner Strike ───────────────────────────────────────────────────────────
+
+function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
+  if (force < PHYSICS.CORNER_STRIKE_THRESHOLD) return;
+
+  const aCanStrike = instA.defId !== 'maru';
+  const bCanStrike = instB.defId !== 'maru';
+  if (!aCanStrike && !bCanStrike) return;
+
+  if (Math.random() > PHYSICS.CORNER_STRIKE_CHANCE) return;
+
+  const impulseScale = Math.min(Math.sqrt(force / PHYSICS.CORNER_STRIKE_THRESHOLD), 3.0);
+  const impulse      = PHYSICS.CORNER_STRIKE_IMPULSE * impulseScale;
+
+  let striker, target, strikerBody, targetBody;
+
+  if (aCanStrike && !bCanStrike) {
+    striker = instA; strikerBody = bodyA;
+    target  = instB; targetBody  = bodyB;
+  } else if (bCanStrike && !aCanStrike) {
+    striker = instB; strikerBody = bodyB;
+    target  = instA; targetBody  = bodyA;
+  } else {
+    const scoreA = instA.spinSpeed * instA.def.stability;
+    const scoreB = instB.spinSpeed * instB.def.stability;
+    if (scoreA < scoreB) {
+      striker = instB; strikerBody = bodyB;
+      target  = instA; targetBody  = bodyA;
+    } else {
+      striker = instA; strikerBody = bodyA;
+      target  = instB; targetBody  = bodyB;
+    }
+  }
+
+  const dx  = targetBody.position.x - strikerBody.position.x;
+  const dy  = targetBody.position.y - strikerBody.position.y;
+  const mag = Math.hypot(dx, dy) || 1;
+
+  const currentSpd = Math.hypot(targetBody.velocity.x, targetBody.velocity.y);
+  Matter.Body.setVelocity(targetBody, {
+    x: (dx / mag) * (impulse + currentSpd * 0.5),
+    y: (dy / mag) * (impulse + currentSpd * 0.5),
+  });
+
+  const targetId = _instanceId(target);
+  if (topPhysState[targetId]) {
+    topPhysState[targetId].ejectFrames = PHYSICS.EJECT_SUPPRESS_FRAMES;
+  }
+
+  // Hajiki self-ejection -- 30% chance
+  let selfEjected = false;
+  if (striker.defId === 'hajiki' && Math.random() < 0.30) {
+    const selfImpulse = impulse * 0.7;
+    Matter.Body.setVelocity(strikerBody, {
+      x: -(dx / mag) * selfImpulse,
+      y: -(dy / mag) * selfImpulse,
+    });
+    const strikerId = _instanceId(striker);
+    if (topPhysState[strikerId]) {
+      topPhysState[strikerId].ejectFrames = PHYSICS.EJECT_SUPPRESS_FRAMES;
+    }
+    selfEjected = true;
+  }
+
+  if (onCornerStrike) onCornerStrike(striker, target, force, impulse, selfEjected);
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function _instanceId(instance) {
+  return `${instance.owner}_${instance.defId}`;
+}
+
+function _findInstanceByBody(body) {
+  for (const [id, b] of Object.entries(topBodies)) {
+    if (b === body) {
+      return _instanceRegistry[id] || null;
+    }
+  }
+  return null;
+}
+
+const _instanceRegistry = {};
+
+function registerInstance(instance) {
+  _instanceRegistry[_instanceId(instance)] = instance;
+}
+
+function unregisterInstance(instance) {
+  delete _instanceRegistry[_instanceId(instance)];
+}
+
+function getPhysState(instance) {
+  return topPhysState[_instanceId(instance)] || null;
+}
+
+function resetPhysics() {
+  if (world) {
+    Matter.World.clear(world);
+    Matter.Engine.clear(engine);
+  }
+  topBodies    = {};
+  topPhysState = {};
+  Object.keys(_instanceRegistry).forEach(k => delete _instanceRegistry[k]);
+  _buildArena();
+}
+
+// ─── Exports ─────────────────────────────────────────────────────────────────
+
+if (typeof window !== 'undefined') {
+  window.Physics = {
+    PHYSICS,
+    BODY_PARAMS,
+    initPhysics,
+    addTopToWorld,
+    removeTopFromWorld,
+    updatePhysics,
+    registerInstance,
+    unregisterInstance,
+    getPhysState,
+    resetPhysics,
+  };
+}
