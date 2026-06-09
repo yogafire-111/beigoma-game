@@ -186,8 +186,8 @@ function updatePhysics(instances) {
     _updateSpinDecay(instance, body, dist);
     _updateJump(pstate);
 
-    pstate.tickPhase += instance.spinSpeed * 0.18;
-    instance.angle    = body.angle + pstate.tickPhase * 0.5;
+    pstate.tickPhase += instance.spinSpeed * 9.0;
+    instance.angle    = pstate.tickPhase;
 
     if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
       instance.alive = false;

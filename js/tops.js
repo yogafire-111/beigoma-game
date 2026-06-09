@@ -385,9 +385,6 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   // Glitter
   drawGlitter(ctx, r, spinSpeed, tickPhase);
 
-  // Rim ticks
-  drawRimTicks(ctx, r, tickPhase, spinSpeed);
-
   // Tilt ring
   if (showTilt) {
     drawTiltRing(ctx, r, tiltAmount);
