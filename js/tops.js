@@ -8,23 +8,23 @@ const TOP_DEFS = {
   nomaru: {
     id:          'nomaru',
     hiragana:    'のーまる',
-    color:       '#C0C0C0',   // silver
+    color:       '#C0C0C0',
     colorDim:    '#888888',
     profile:     'hexagon',
     tipType:     'round',
-    spinDuration: 40,         // seconds at ideal conditions
+    spinDuration: 40,
     impactForce:  1.0,
     deflection:   0.5,
     drift:        0.5,
     stability:    0.6,
     mass:         1.0,
-    radius:       32,         // canvas pixels
+    radius:       32,
   },
 
   riki: {
     id:          'riki',
     hiragana:    'りき',
-    color:       '#1a2744',   // dark navy
+    color:       '#1a2744',
     colorDim:    '#0d1422',
     profile:     'hexagon',
     tipType:     'fine',
@@ -40,7 +40,7 @@ const TOP_DEFS = {
   maru: {
     id:          'maru',
     hiragana:    'まる',
-    color:       '#9DC416',   // yellow-green
+    color:       '#9DC416',
     colorDim:    '#5a7a0a',
     profile:     'circle',
     tipType:     'fine',
@@ -56,7 +56,7 @@ const TOP_DEFS = {
   hajiki: {
     id:          'hajiki',
     hiragana:    'はじき',
-    color:       '#CC2200',   // red
+    color:       '#CC2200',
     colorDim:    '#7a1500',
     profile:     'hexagon',
     tipType:     'flat',
@@ -70,7 +70,6 @@ const TOP_DEFS = {
   },
 };
 
-// Order for UI display
 const TOP_ORDER = ['nomaru', 'riki', 'maru', 'hajiki'];
 
 // ─── Alignment ──────────────────────────────────────────────────────────────
@@ -89,16 +88,16 @@ function createTopInstance(defId, owner) {
     defId,
     owner,
     def,
-    body:        null,
-    spinSpeed:   0,
-    angle:       0,
-    tilt:        0,
-    sideContact: false,
-    alignment:   randomAlignment(),
+    body:         null,
+    spinSpeed:    0,
+    angle:        0,
+    tilt:         0,
+    sideContact:  false,
+    alignment:    randomAlignment(),
     hasContacted: false,
     alive:        true,
     opacity:      1.0,
-    launched:    false,
+    launched:     false,
   };
 }
 
@@ -150,75 +149,88 @@ function drawHajikiSlashes(ctx, r, angle) {
   ctx.restore();
 }
 
-function drawRimTicks(ctx, r, tickPhase, spinSpeed) {
-  const tickCount = 12;
-  const alpha = 0.4 + spinSpeed * 0.55;
-  ctx.save();
-  ctx.rotate(tickPhase);
-  ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-  ctx.lineWidth = 2.5;
-  for (let i = 0; i < tickCount; i++) {
-    const a = (Math.PI * 2 / tickCount) * i;
-    const inner = r * 0.68;
-    const outer = r * 0.95;
-    ctx.beginPath();
-    ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
-    ctx.lineTo(Math.cos(a) * outer, Math.sin(a) * outer);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
+// ─── Spin Blur (arc streaks, inner + outer) ──────────────────────────────────
+// Inner: white arcs close to the body, always present above min spin.
+// Outer: colored arcs extending beyond the body radius, growing with spin speed.
+// The outer ring gives each top a distinct energy color signature.
 
-// ─── Spin Blur (arc streaks) ─────────────────────────────────────────────────
-// Replaces the old radial gradient + arc approach.
-// At low spin: invisible. At mid spin: faint short arcs.
-// At high spin: long bright arcs that merge into a near-disc blur.
-
-function drawSpinBlur(ctx, r, spinSpeed, angle) {
+function drawSpinBlur(ctx, r, spinSpeed, angle, topColor) {
   if (spinSpeed < 0.05) return;
 
   const streakCount = 6;
-  const maxArcLen   = Math.PI * 0.75;                        // max arc length at full spin
-  const arcLen      = maxArcLen * Math.min(spinSpeed / 0.7, 1.0);
-  const baseAlpha   = Math.min(spinSpeed * 0.9, 0.72);
-  const lineWidth   = r * 0.32;
+  const maxArcLen   = Math.PI * 1.1;
+  const arcLen      = maxArcLen * Math.min(spinSpeed / 0.65, 1.0);
+  const baseAlpha   = Math.min(spinSpeed * 1.4, 0.88);
+  const lineWidth   = r * 0.42;
 
   ctx.save();
   ctx.rotate(angle);
 
+  // ── Inner white streaks ──
   for (let i = 0; i < streakCount; i++) {
     const startAngle = (Math.PI * 2 / streakCount) * i;
-    const endAngle   = startAngle + arcLen;
-
-    // Each streak fades from bright at head to transparent at tail
-    const grad = ctx.createConicalGradient
-      ? null   // not widely supported, use fallback
-      : null;
-
-    // Fallback: draw arc in segments with decreasing alpha
-    const segments = 6;
+    const segments   = 8;
     for (let s = 0; s < segments; s++) {
-      const t0 = s / segments;
-      const t1 = (s + 1) / segments;
-      const a0 = startAngle + arcLen * t0;
-      const a1 = startAngle + arcLen * t1;
-      // Head is brightest, tail fades
-      const segAlpha = baseAlpha * (1 - t0 * 0.85);
+      const t0       = s / segments;
+      const a0       = startAngle + arcLen * t0;
+      const a1       = startAngle + arcLen * ((s + 1) / segments);
+      const segAlpha = baseAlpha * (1 - t0 * 0.88);
 
       ctx.beginPath();
-      ctx.arc(0, 0, r * 0.72, a0, a1);
+      ctx.arc(0, 0, r * 0.74, a0, a1);
       ctx.strokeStyle = `rgba(255,255,255,${segAlpha})`;
-      ctx.lineWidth   = lineWidth * (1 - t0 * 0.4);
+      ctx.lineWidth   = lineWidth * (1 - t0 * 0.5);
       ctx.stroke();
     }
   }
 
-  // At high spin, add a soft outer glow ring to suggest the body blurring into a disc
-  if (spinSpeed > 0.45) {
-    const glowAlpha = Math.min((spinSpeed - 0.45) * 1.1, 0.45);
-    const grad = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.05);
+  // ── Outer colored streaks (extend beyond body, grow with spin) ──
+  if (spinSpeed > 0.15 && topColor) {
+    const [tr, tg, tb] = _hexToRgbLocal(topColor);
+    const outerRadius  = r * (1.05 + spinSpeed * 1.2);   // grows outward with spin
+    const outerArcLen  = arcLen * 0.85;
+    const outerAlpha   = Math.min((spinSpeed - 0.15) * 1.6, 0.75);
+    const outerWidth   = r * 0.28 * spinSpeed;
+
+    for (let i = 0; i < streakCount; i++) {
+      const startAngle = (Math.PI * 2 / streakCount) * i + 0.15; // slight offset from inner
+      const segments   = 7;
+      for (let s = 0; s < segments; s++) {
+        const t0       = s / segments;
+        const a0       = startAngle + outerArcLen * t0;
+        const a1       = startAngle + outerArcLen * ((s + 1) / segments);
+        const segAlpha = outerAlpha * (1 - t0 * 0.9);
+
+        ctx.beginPath();
+        ctx.arc(0, 0, outerRadius, a0, a1);
+        ctx.strokeStyle = `rgba(${tr},${tg},${tb},${segAlpha})`;
+        ctx.lineWidth   = outerWidth * (1 - t0 * 0.6);
+        ctx.stroke();
+      }
+    }
+
+    // Soft colored glow halo at high spin
+    if (spinSpeed > 0.5) {
+      const haloAlpha = Math.min((spinSpeed - 0.5) * 1.2, 0.5);
+      const haloR     = r * (1.1 + spinSpeed * 1.0);
+      const grad = ctx.createRadialGradient(0, 0, r * 0.8, 0, 0, haloR * 1.2);
+      grad.addColorStop(0,   `rgba(${tr},${tg},${tb},0)`);
+      grad.addColorStop(0.5, `rgba(${tr},${tg},${tb},${haloAlpha * 0.4})`);
+      grad.addColorStop(0.85,`rgba(${tr},${tg},${tb},${haloAlpha})`);
+      grad.addColorStop(1,   `rgba(${tr},${tg},${tb},0)`);
+      ctx.beginPath();
+      ctx.arc(0, 0, haloR * 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+  }
+
+  // White glow disc at very high spin
+  if (spinSpeed > 0.4) {
+    const glowAlpha = Math.min((spinSpeed - 0.4) * 1.3, 0.55);
+    const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.1);
     grad.addColorStop(0,    `rgba(255,255,255,0)`);
-    grad.addColorStop(0.65, `rgba(255,255,255,${glowAlpha * 0.3})`);
+    grad.addColorStop(0.6,  `rgba(255,255,255,${glowAlpha * 0.3})`);
     grad.addColorStop(0.88, `rgba(255,255,255,${glowAlpha})`);
     grad.addColorStop(1,    `rgba(255,255,255,0)`);
     ctx.beginPath();
@@ -231,40 +243,32 @@ function drawSpinBlur(ctx, r, spinSpeed, angle) {
 }
 
 // ─── Glitter ──────────────────────────────────────────────────────────────────
-// Fixed points distributed across the top surface.
-// Each point has a catch angle -- when the top's rotation passes through it,
-// the point briefly flashes white/gold, simulating light catching glitter.
-// Color-independent: same effect on all tops.
 
-// Pre-generate glitter point layouts per top type.
-// Points are stored as { r: fraction of radius, a: angle offset, catchWidth }
-const GLITTER_POINTS = _generateGlitterPoints(11);
+const GLITTER_POINTS = _generateGlitterPoints(18);
 
 function _generateGlitterPoints(count) {
-  const pts = [];
-  // Use a sunflower/Fibonacci spiral for even distribution
+  const pts    = [];
   const golden = Math.PI * (3 - Math.sqrt(5));
   for (let i = 0; i < count; i++) {
     const t    = i / count;
-    const dist = 0.2 + t * 0.72;           // keep away from very center and edge
+    const dist = 0.15 + t * 0.78;
     const ang  = golden * i;
     pts.push({
-      rx:         Math.cos(ang) * dist,    // relative x (fraction of radius)
-      ry:         Math.sin(ang) * dist,    // relative y
-      catchWidth: 0.18 + Math.random() * 0.22,  // how wide the flash window is
-      phase:      Math.random() * Math.PI * 2,   // individual phase offset
-      size:       1.2 + Math.random() * 1.8,     // point size in px
-      gold:       Math.random() < 0.4,           // gold vs white
+      rx:         Math.cos(ang) * dist,
+      ry:         Math.sin(ang) * dist,
+      catchWidth: 0.32 + Math.random() * 0.38,
+      phase:      Math.random() * Math.PI * 2,
+      size:       2.2 + Math.random() * 3.0,
+      gold:       Math.random() < 0.45,
     });
   }
   return pts;
 }
 
 function drawGlitter(ctx, r, spinSpeed, angle) {
-  if (spinSpeed < 0.08) return;
+  if (spinSpeed < 0.06) return;
 
-  // Overall glitter brightness scales with spin -- fast spin = more light catches
-  const masterAlpha = Math.min((spinSpeed - 0.08) / 0.5, 1.0);
+  const masterAlpha = Math.min((spinSpeed - 0.06) / 0.35, 1.0);
   if (masterAlpha <= 0) return;
 
   ctx.save();
@@ -273,34 +277,56 @@ function drawGlitter(ctx, r, spinSpeed, angle) {
     const px = pt.rx * r;
     const py = pt.ry * r;
 
-    // The catch angle rotates with the top. Flash when angle mod 2π is near catchAngle.
-    const catchAngle = pt.phase;
+    const catchAngle   = pt.phase;
     const currentAngle = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const diff = Math.abs(currentAngle - catchAngle);
-    const wrap = Math.min(diff, Math.PI * 2 - diff);
+    const diff         = Math.abs(currentAngle - catchAngle);
+    const wrap         = Math.min(diff, Math.PI * 2 - diff);
 
     if (wrap > pt.catchWidth) continue;
 
-    // Flash intensity: peak at center of catch window, falls off toward edges
-    const intensity = Math.pow(1 - wrap / pt.catchWidth, 2) * masterAlpha;
-    if (intensity < 0.05) continue;
+    const intensity = Math.pow(1 - wrap / pt.catchWidth, 1.5) * masterAlpha;
+    if (intensity < 0.04) continue;
 
-    const color = pt.gold
-      ? `rgba(255,230,120,${intensity})`
-      : `rgba(255,255,255,${intensity})`;
-
-    // Inner glow + bright center
+    // Large soft outer glow
     ctx.beginPath();
-    ctx.arc(px, py, pt.size * 2.2, 0, Math.PI * 2);
+    ctx.arc(px, py, pt.size * 4.5, 0, Math.PI * 2);
     ctx.fillStyle = pt.gold
-      ? `rgba(255,210,80,${intensity * 0.3})`
-      : `rgba(255,255,255,${intensity * 0.25})`;
+      ? `rgba(255,200,60,${intensity * 0.18})`
+      : `rgba(255,255,255,${intensity * 0.15})`;
     ctx.fill();
 
+    // Medium glow
+    ctx.beginPath();
+    ctx.arc(px, py, pt.size * 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = pt.gold
+      ? `rgba(255,220,100,${intensity * 0.45})`
+      : `rgba(255,255,255,${intensity * 0.4})`;
+    ctx.fill();
+
+    // Bright center point
     ctx.beginPath();
     ctx.arc(px, py, pt.size, 0, Math.PI * 2);
-    ctx.fillStyle = color;
+    ctx.fillStyle = pt.gold
+      ? `rgba(255,240,160,${intensity})`
+      : `rgba(255,255,255,${intensity})`;
     ctx.fill();
+
+    // Star cross flare on bright hits
+    if (intensity > 0.6) {
+      const flareLen = pt.size * 5 * intensity;
+      ctx.strokeStyle = pt.gold
+        ? `rgba(255,230,120,${intensity * 0.5})`
+        : `rgba(255,255,255,${intensity * 0.45})`;
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(px - flareLen, py);
+      ctx.lineTo(px + flareLen, py);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px, py - flareLen);
+      ctx.lineTo(px, py + flareLen);
+      ctx.stroke();
+    }
   }
 
   ctx.restore();
@@ -342,19 +368,15 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   ctx.save();
   ctx.globalAlpha = opacity;
 
-  // Shadow
   drawShadow(ctx, r);
 
-  // Wobble skew
   if (tilt > 0) {
     const skew = tilt * 0.25;
     ctx.transform(1, 0, skew, 1 - tilt * 0.1, 0, 0);
   }
 
-  // Rotate to current angle
   ctx.rotate(angle);
 
-  // Body fill
   if (def.profile === 'hexagon') {
     hexPath(ctx, r);
   } else {
@@ -379,13 +401,12 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   ctx.save();
   ctx.globalAlpha = opacity;
 
-  // Spin blur (arc streaks)
-  drawSpinBlur(ctx, r, spinSpeed, tickPhase);
+  // Spin blur with outer colored streaks
+  drawSpinBlur(ctx, r, spinSpeed, tickPhase, def.color);
 
   // Glitter
   drawGlitter(ctx, r, spinSpeed, tickPhase);
 
-  // Tilt ring
   if (showTilt) {
     drawTiltRing(ctx, r, tiltAmount);
   }
@@ -490,6 +511,10 @@ function hexToRgb(hex) {
   return [r, g, b];
 }
 
+function _hexToRgbLocal(hex) {
+  return hexToRgb(hex);
+}
+
 function lighten(hex, amount) {
   const [r,g,b] = hexToRgb(hex);
   const l = (c) => Math.min(255, Math.round(c + (255 - c) * amount));
@@ -512,5 +537,6 @@ if (typeof window !== 'undefined') {
     createTopInstance,
     drawTop,
     drawThreeView,
+    hexToRgb,
   };
 }

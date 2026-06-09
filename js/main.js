@@ -66,27 +66,39 @@ const TRAIL_VEL_THRESH = 3.0;
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
 function spawnSparks(x, y, force) {
-  const count = Math.floor(8 + force * 32);
+  const count = Math.floor(20 + force * 80);
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 2.5 + Math.random() * force * 10;
+    const speed = 3.5 + Math.random() * force * 18;
+    const isBig = Math.random() < 0.25;
     particles.push({
       x, y,
       vx:    Math.cos(angle) * speed,
       vy:    Math.sin(angle) * speed,
       life:  1.0,
-      decay: 0.028 + Math.random() * 0.025,
-      size:  2.5 + Math.random() * 3.5,
-      color: Math.random() < 0.5 ? '#FFD700' :
-             Math.random() < 0.7 ? '#FF6600' : '#FFFFFF',
+      decay: isBig ? 0.016 + Math.random() * 0.014 : 0.024 + Math.random() * 0.028,
+      size:  isBig ? 5.5 + Math.random() * 6.0 : 2.5 + Math.random() * 4.5,
+      color: Math.random() < 0.45 ? '#FFD700' :
+             Math.random() < 0.65 ? '#FF6600' :
+             Math.random() < 0.8  ? '#FFFFFF' : '#FF2200',
     });
   }
+  // Large central flash
   particles.push({
     x, y,
     vx: 0, vy: 0,
-    life: 1.0, decay: 0.12,
-    size: 18 + force * 20,
-    color: 'rgba(255,240,180,0.5)',
+    life: 1.0, decay: 0.07,
+    size: 32 + force * 48,
+    color: 'rgba(255,240,180,0.6)',
+    isFlash: true,
+  });
+  // Second smaller hot flash
+  particles.push({
+    x, y,
+    vx: 0, vy: 0,
+    life: 1.0, decay: 0.11,
+    size: 16 + force * 24,
+    color: 'rgba(255,180,80,0.5)',
     isFlash: true,
   });
 }
