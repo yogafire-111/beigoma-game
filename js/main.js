@@ -69,8 +69,9 @@ function spawnSparks(x, y, force) {
   const count = Math.floor(20 + force * 80);
   for (let i = 0; i < count; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 3.5 + Math.random() * force * 18;
+    const speed = 8 + Math.random() * force * 28;
     const isBig = Math.random() < 0.25;
+    const isGold = Math.random() < 0.5;
     particles.push({
       x, y,
       vx:    Math.cos(angle) * speed,
@@ -78,9 +79,9 @@ function spawnSparks(x, y, force) {
       life:  1.0,
       decay: isBig ? 0.016 + Math.random() * 0.014 : 0.024 + Math.random() * 0.028,
       size:  isBig ? 5.5 + Math.random() * 6.0 : 2.5 + Math.random() * 4.5,
-      color: Math.random() < 0.45 ? '#FFD700' :
-             Math.random() < 0.65 ? '#FF6600' :
-             Math.random() < 0.8  ? '#FFFFFF' : '#FF2200',
+      color: isGold
+        ? (Math.random() < 0.5 ? '#FFD700' : '#FFAA00')
+        : (Math.random() < 0.5 ? '#FFFFFF' : '#FFFACC'),
     });
   }
   // Large central flash
@@ -98,7 +99,7 @@ function spawnSparks(x, y, force) {
     vx: 0, vy: 0,
     life: 1.0, decay: 0.11,
     size: 16 + force * 24,
-    color: 'rgba(255,180,80,0.5)',
+    color: 'rgba(255,210,80,0.5)',
     isFlash: true,
   });
 }

@@ -171,21 +171,19 @@ function drawAura(ctx, r, spinSpeed, tickPhase, topColor, alive) {
 
   ctx.save();
 
-  // ── White inner glow ring -- always visible regardless of top color ──
-  const whiteR = r * (1.04 + spinSpeed * 0.18);
-  ctx.beginPath();
-  ctx.arc(0, 0, whiteR, 0, Math.PI * 2);
-  ctx.strokeStyle = `rgba(255,255,255,${strength * 0.7})`;
-  ctx.lineWidth   = 2.5 * strength;
-  ctx.stroke();
+  // ── Luminance check -- dark tops get a brighter aura color ──
+  const luminance = (0.299 * tr + 0.587 * tg + 0.114 * tb) / 255;
+  const auraR = luminance < 0.25 ? Math.min(255, tr + 120) : tr;
+  const auraG = luminance < 0.25 ? Math.min(255, tg + 140) : tg;
+  const auraB = luminance < 0.25 ? Math.min(255, tb + 200) : tb;
 
-  // Soft white halo just outside body
-  const whiteGrad = ctx.createRadialGradient(0, 0, r * 0.85, 0, 0, r * 1.35);
+  // Soft white halo just outside body -- diffuse, no hard edge
+  const whiteGrad = ctx.createRadialGradient(0, 0, r * 0.85, 0, 0, r * 1.45);
   whiteGrad.addColorStop(0,   `rgba(255,255,255,0)`);
-  whiteGrad.addColorStop(0.5, `rgba(255,255,255,${strength * 0.18})`);
+  whiteGrad.addColorStop(0.4, `rgba(255,255,255,${strength * 0.22})`);
   whiteGrad.addColorStop(1,   `rgba(255,255,255,0)`);
   ctx.beginPath();
-  ctx.arc(0, 0, r * 1.35, 0, Math.PI * 2);
+  ctx.arc(0, 0, r * 1.45, 0, Math.PI * 2);
   ctx.fillStyle = whiteGrad;
   ctx.fill();
 
@@ -204,10 +202,10 @@ function drawAura(ctx, r, spinSpeed, tickPhase, topColor, alive) {
   ctx.closePath();
 
   const grad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, outerR + waveAmp);
-  grad.addColorStop(0,    `rgba(${tr},${tg},${tb},0)`);
-  grad.addColorStop(0.35, `rgba(${tr},${tg},${tb},${colorAlpha * 0.25})`);
-  grad.addColorStop(0.72, `rgba(${tr},${tg},${tb},${colorAlpha * 0.65})`);
-  grad.addColorStop(1,    `rgba(${tr},${tg},${tb},0)`);
+  grad.addColorStop(0,    `rgba(${auraR},${auraG},${auraB},0)`);
+  grad.addColorStop(0.35, `rgba(${auraR},${auraG},${auraB},${colorAlpha * 0.25})`);
+  grad.addColorStop(0.72, `rgba(${auraR},${auraG},${auraB},${colorAlpha * 0.65})`);
+  grad.addColorStop(1,    `rgba(${auraR},${auraG},${auraB},0)`);
   ctx.fillStyle = grad;
   ctx.fill();
 
@@ -224,7 +222,7 @@ function drawAura(ctx, r, spinSpeed, tickPhase, topColor, alive) {
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.strokeStyle = `rgba(${tr},${tg},${tb},${colorAlpha * 0.55})`;
+  ctx.strokeStyle = `rgba(${auraR},${auraG},${auraB},${colorAlpha * 0.55})`;
   ctx.lineWidth   = 2.0 * strength;
   ctx.stroke();
 
