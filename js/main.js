@@ -66,7 +66,7 @@ const TRAIL_VEL_THRESH = 3.0;
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
 function spawnSparks(x, y, force) {
-  const count = Math.floor(24 + force * 90);
+  const count = Math.floor(50 + force * 140);
   for (let i = 0; i < count; i++) {
     const angle  = Math.random() * Math.PI * 2;
     const speed  = 14 + Math.random() * force * 38;
@@ -76,12 +76,12 @@ function spawnSparks(x, y, force) {
       vx:    Math.cos(angle) * speed,
       vy:    Math.sin(angle) * speed,
       life:  1.0,
-      decay: 0.038 + Math.random() * 0.032,
+      decay: 0.016 + Math.random() * 0.016,
       size:  1.0 + Math.random() * 1.5,
       color: isGold
         ? (Math.random() < 0.5 ? '#FFD700' : '#FFAA00')
         : (Math.random() < 0.5 ? '#FFFFFF' : '#FFFACC'),
-      isSpark: true,   // render as line segment
+      isSpark: true,
     });
   }
   // Large central flash
