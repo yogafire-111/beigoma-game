@@ -669,9 +669,23 @@ function gameLoop() {
   ctx.save();
   applyScreenShake();
 
-  // Motion trails drawn behind tops
+  // Motion trails drawn behind everything
   drawMotionTrails();
 
+  // Pass 1: auras for all tops (so no aura renders over another top's body)
+  for (const inst of liveInstances) {
+    if (!inst.launched || !inst.body) continue;
+    const pstate = Physics.getPhysState(inst);
+    if (!pstate) continue;
+    const x = inst.body.position.x;
+    const y = inst.body.position.y - pstate.jumpOffset;
+    ctx.save();
+    ctx.translate(x, y);
+    Tops.drawTopAura(ctx, inst, pstate.tickPhase);
+    ctx.restore();
+  }
+
+  // Pass 2: top bodies on top of all auras
   drawAllTops();
 
   updateParticles();

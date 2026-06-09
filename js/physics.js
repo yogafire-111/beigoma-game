@@ -121,6 +121,7 @@ function addTopToWorld(instance, x, y, vx, vy, spinSpeed) {
     jumpVel:      0,
     tickPhase:    0,
     ejectFrames:  0,   // frames remaining where radial damping is suppressed
+    auraPhase:    Math.random() * Math.PI * 2,  // independent aura wave timer
   };
 }
 
@@ -187,7 +188,9 @@ function updatePhysics(instances) {
     _updateJump(pstate);
 
     pstate.tickPhase += instance.spinSpeed * 8.7;
+    pstate.auraPhase += 0.04;   // fixed rate, independent of spin
     instance.angle    = pstate.tickPhase;
+    instance.auraPhase = pstate.auraPhase;
 
     if (instance.spinSpeed <= PHYSICS.SPIN_FALL_THRESH && instance.alive) {
       instance.alive = false;

@@ -8,8 +8,8 @@ const TOP_DEFS = {
   nomaru: {
     id:          'nomaru',
     hiragana:    'のーまる',
-    color:       '#C0C0C0',
-    colorDim:    '#888888',
+    color:       '#707070',   // darker gray so glitter/effects read clearly
+    colorDim:    '#444444',
     profile:     'hexagon',
     tipType:     'round',
     spinDuration: 40,
@@ -91,6 +91,7 @@ function createTopInstance(defId, owner) {
     body:         null,
     spinSpeed:    0,
     angle:        0,
+    auraPhase:    0,   // independent aura wave timer, set by physics.js
     tilt:         0,
     sideContact:  false,
     alignment:    randomAlignment(),
@@ -149,12 +150,73 @@ function drawHajikiSlashes(ctx, r, angle) {
   ctx.restore();
 }
 
-// ─── Spin Blur (arc streaks, inner + outer) ──────────────────────────────────
-// Inner: white arcs close to the body, always present above min spin.
-// Outer: colored arcs extending beyond the body radius, growing with spin speed.
-// The outer ring gives each top a distinct energy color signature.
+// ─── Wavy Aura (outer energy halo) ──────────────────────────────────────────
+// Drawn in a separate pass BEFORE top bodies so bodies render on top.
+// auraPhase: independent timer, not tied to spin rotation.
+// Only visible while alive -- zeroed out on ejection/death.
 
-function drawSpinBlur(ctx, r, spinSpeed, angle, topColor) {
+function drawAura(ctx, r, spinSpeed, auraPhase, topColor, alive) {
+  if (!alive) return;
+  if (spinSpeed < 0.15) return;
+
+  const [tr, tg, tb] = hexToRgb(topColor);
+  const strength     = Math.min((spinSpeed - 0.15) / 0.5, 1.0);
+  const outerR       = r * (1.1 + spinSpeed * 1.3);
+  const wavePoints   = 64;
+  const waveAmp      = r * 0.18 * strength;
+  const waveFreq     = 5;   // number of waves around the circumference
+  const waveFreq2    = 7;   // second harmonic for more organic shape
+  const alpha        = strength * 0.55;
+
+  ctx.save();
+
+  // Outer wavy fill -- soft diffuse glow
+  ctx.beginPath();
+  for (let i = 0; i <= wavePoints; i++) {
+    const t   = (i / wavePoints) * Math.PI * 2;
+    const wave =
+      Math.sin(t * waveFreq  + auraPhase * 1.3) * waveAmp +
+      Math.sin(t * waveFreq2 + auraPhase * 0.9) * waveAmp * 0.45;
+    const rad = outerR + wave;
+    const x   = Math.cos(t) * rad;
+    const y   = Math.sin(t) * rad;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+
+  const grad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, outerR + waveAmp);
+  grad.addColorStop(0,    `rgba(${tr},${tg},${tb},0)`);
+  grad.addColorStop(0.35, `rgba(${tr},${tg},${tb},${alpha * 0.25})`);
+  grad.addColorStop(0.72, `rgba(${tr},${tg},${tb},${alpha * 0.65})`);
+  grad.addColorStop(1,    `rgba(${tr},${tg},${tb},0)`);
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Second wavy ring -- slightly different phase for depth
+  ctx.beginPath();
+  const innerR = r * (1.02 + spinSpeed * 0.7);
+  for (let i = 0; i <= wavePoints; i++) {
+    const t    = (i / wavePoints) * Math.PI * 2;
+    const wave =
+      Math.sin(t * waveFreq  + auraPhase * 1.7 + 1.0) * waveAmp * 0.5 +
+      Math.sin(t * waveFreq2 + auraPhase * 1.1 + 2.3) * waveAmp * 0.3;
+    const rad = innerR + wave;
+    const x   = Math.cos(t) * rad;
+    const y   = Math.sin(t) * rad;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = `rgba(${tr},${tg},${tb},${alpha * 0.5})`;
+  ctx.lineWidth   = 2.5 * strength;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+// ─── Spin Blur (inner arc streaks) ───────────────────────────────────────────
+// Inner white streaks close to the body -- always present above min spin.
+
+function drawSpinBlur(ctx, r, spinSpeed, angle) {
   if (spinSpeed < 0.05) return;
 
   const streakCount = 6;
@@ -166,7 +228,6 @@ function drawSpinBlur(ctx, r, spinSpeed, angle, topColor) {
   ctx.save();
   ctx.rotate(angle);
 
-  // ── Inner white streaks ──
   for (let i = 0; i < streakCount; i++) {
     const startAngle = (Math.PI * 2 / streakCount) * i;
     const segments   = 8;
@@ -184,51 +245,10 @@ function drawSpinBlur(ctx, r, spinSpeed, angle, topColor) {
     }
   }
 
-  // ── Outer colored streaks (extend beyond body, grow with spin) ──
-  if (spinSpeed > 0.15 && topColor) {
-    const [tr, tg, tb] = _hexToRgbLocal(topColor);
-    const outerRadius  = r * (1.05 + spinSpeed * 1.2);   // grows outward with spin
-    const outerArcLen  = arcLen * 0.85;
-    const outerAlpha   = Math.min((spinSpeed - 0.15) * 1.6, 0.75);
-    const outerWidth   = r * 0.28 * spinSpeed;
-
-    for (let i = 0; i < streakCount; i++) {
-      const startAngle = (Math.PI * 2 / streakCount) * i + 0.15; // slight offset from inner
-      const segments   = 7;
-      for (let s = 0; s < segments; s++) {
-        const t0       = s / segments;
-        const a0       = startAngle + outerArcLen * t0;
-        const a1       = startAngle + outerArcLen * ((s + 1) / segments);
-        const segAlpha = outerAlpha * (1 - t0 * 0.9);
-
-        ctx.beginPath();
-        ctx.arc(0, 0, outerRadius, a0, a1);
-        ctx.strokeStyle = `rgba(${tr},${tg},${tb},${segAlpha})`;
-        ctx.lineWidth   = outerWidth * (1 - t0 * 0.6);
-        ctx.stroke();
-      }
-    }
-
-    // Soft colored glow halo at high spin
-    if (spinSpeed > 0.5) {
-      const haloAlpha = Math.min((spinSpeed - 0.5) * 1.2, 0.5);
-      const haloR     = r * (1.1 + spinSpeed * 1.0);
-      const grad = ctx.createRadialGradient(0, 0, r * 0.8, 0, 0, haloR * 1.2);
-      grad.addColorStop(0,   `rgba(${tr},${tg},${tb},0)`);
-      grad.addColorStop(0.5, `rgba(${tr},${tg},${tb},${haloAlpha * 0.4})`);
-      grad.addColorStop(0.85,`rgba(${tr},${tg},${tb},${haloAlpha})`);
-      grad.addColorStop(1,   `rgba(${tr},${tg},${tb},0)`);
-      ctx.beginPath();
-      ctx.arc(0, 0, haloR * 1.2, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
-      ctx.fill();
-    }
-  }
-
-  // White glow disc at very high spin
+  // White glow disc at high spin
   if (spinSpeed > 0.4) {
     const glowAlpha = Math.min((spinSpeed - 0.4) * 1.3, 0.55);
-    const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.1);
+    const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.05);
     grad.addColorStop(0,    `rgba(255,255,255,0)`);
     grad.addColorStop(0.6,  `rgba(255,255,255,${glowAlpha * 0.3})`);
     grad.addColorStop(0.88, `rgba(255,255,255,${glowAlpha})`);
@@ -303,7 +323,7 @@ function drawGlitter(ctx, r, spinSpeed, angle) {
       : `rgba(255,255,255,${intensity * 0.4})`;
     ctx.fill();
 
-    // Bright center point
+    // Bright center
     ctx.beginPath();
     ctx.arc(px, py, pt.size, 0, Math.PI * 2);
     ctx.fillStyle = pt.gold
@@ -311,7 +331,7 @@ function drawGlitter(ctx, r, spinSpeed, angle) {
       : `rgba(255,255,255,${intensity})`;
     ctx.fill();
 
-    // Star cross flare on bright hits
+    // Star flare on bright catches
     if (intensity > 0.6) {
       const flareLen = pt.size * 5 * intensity;
       ctx.strokeStyle = pt.gold
@@ -359,7 +379,20 @@ function drawTiltRing(ctx, r, tiltAmount) {
   ctx.setLineDash([]);
 }
 
-// ─── Main Draw ───────────────────────────────────────────────────────────────
+// ─── Draw functions split into aura pass and body pass ───────────────────────
+// main.js calls drawTopAura() for ALL tops first, then drawTop() for all tops.
+// This ensures no aura renders on top of another top's body.
+
+function drawTopAura(ctx, instance, tickPhase) {
+  if (!instance.launched) return;
+  const { def, spinSpeed, auraPhase, opacity, alive } = instance;
+  const r = def.radius;
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  drawAura(ctx, r, spinSpeed, auraPhase || tickPhase, def.color, alive);
+  ctx.restore();
+}
 
 function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   const { def, spinSpeed, angle, tilt, opacity } = instance;
@@ -401,8 +434,8 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   ctx.save();
   ctx.globalAlpha = opacity;
 
-  // Spin blur with outer colored streaks
-  drawSpinBlur(ctx, r, spinSpeed, tickPhase, def.color);
+  // Inner spin blur
+  drawSpinBlur(ctx, r, spinSpeed, tickPhase);
 
   // Glitter
   drawGlitter(ctx, r, spinSpeed, tickPhase);
@@ -511,10 +544,6 @@ function hexToRgb(hex) {
   return [r, g, b];
 }
 
-function _hexToRgbLocal(hex) {
-  return hexToRgb(hex);
-}
-
 function lighten(hex, amount) {
   const [r,g,b] = hexToRgb(hex);
   const l = (c) => Math.min(255, Math.round(c + (255 - c) * amount));
@@ -536,6 +565,7 @@ if (typeof window !== 'undefined') {
     randomAlignment,
     createTopInstance,
     drawTop,
+    drawTopAura,
     drawThreeView,
     hexToRgb,
   };
