@@ -17,27 +17,18 @@ canvas.height = SIZE;
 // ─── Launch Constants ────────────────────────────────────────────────────────
 
 const LAUNCH = {
-  // Mouse path history for curvature detection
-  PATH_HISTORY:     12,       // frames of mouse positions to track
-
-  // Velocity thresholds (px/frame)
-  VEL_MIN:          1.5,      // below this = too slow, weak launch
-  VEL_SWEET_LOW:    8.0,      // sweet spot starts here
-  VEL_SWEET_HIGH:   22.0,     // sweet spot ends here (peak spin)
-  VEL_MAX:          32.0,     // above this = overshoot / miss
-
-  // Curvature thresholds (deviation px over path history)
-  CURVE_FLAT:       6,        // below this = flat launch (good)
-  CURVE_TILT:       22,       // moderate tilt, spin penalty on landing
-  CURVE_STEEP:      45,       // steep, side contact, rapid decay
-  CURVE_MISS:       75,       // too curved, misses or lands on side fully
-
-  // Launch position (fraction of arena radius from center)
+  PATH_HISTORY:     12,
+  VEL_MIN:          1.5,
+  VEL_SWEET_LOW:    8.0,
+  VEL_SWEET_HIGH:   22.0,
+  VEL_MAX:          32.0,
+  CURVE_FLAT:       6,
+  CURVE_TILT:       22,
+  CURVE_STEEP:      45,
+  CURVE_MISS:       75,
   PLAYER_LAUNCH_FRACTION: 0.78,
   CPU_LAUNCH_FRACTION:    0.78,
-
-  // CPU visual launch animation
-  CPU_ANIMATE_FRAMES: 30,     // frames for CPU top to slide into position
+  CPU_ANIMATE_FRAMES: 30,
 };
 
 // ─── Input State ─────────────────────────────────────────────────────────────
@@ -48,23 +39,29 @@ const input = {
   startY:      0,
   currentX:    0,
   currentY:    0,
-  path:        [],            // [{x,y}] recent mouse positions
+  path:        [],
   releaseVelX: 0,
   releaseVelY: 0,
 };
 
 // ─── Render State ────────────────────────────────────────────────────────────
 
-let liveInstances   = [];     // all top instances currently tracked
-let particles       = [];     // collision spark particles
-let cpuAnimProgress = 0;      // 0→1 during CPU launch animation
+let liveInstances   = [];
+let particles       = [];
+let cpuAnimProgress = 0;
 let cpuAnimating    = false;
 
 // Impact effects state
-let shakeFrames     = 0;      // remaining screen shake frames
-let shakeMagnitude  = 0;      // current shake intensity
-let hitStopFrames   = 0;      // freeze frames on big impact
-let impactFlashes   = [];     // expanding ring flashes
+let shakeFrames     = 0;
+let shakeMagnitude  = 0;
+let hitStopFrames   = 0;
+let impactFlashes   = [];
+
+// ─── Motion Trail State ───────────────────────────────────────────────────────
+
+const trailHistory     = new Map();
+const TRAIL_LENGTH     = 8;
+const TRAIL_VEL_THRESH = 3.0;
 
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
@@ -84,7 +81,6 @@ function spawnSparks(x, y, force) {
              Math.random() < 0.7 ? '#FF6600' : '#FFFFFF',
     });
   }
-  // Add a brief flash ring at impact point
   particles.push({
     x, y,
     vx: 0, vy: 0,
@@ -100,7 +96,7 @@ function updateParticles() {
     const p = particles[i];
     p.x    += p.vx;
     p.y    += p.vy;
-    p.vy   += 0.12;   // gravity
+    p.vy   += 0.12;
     p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }
@@ -128,18 +124,13 @@ function drawParticles() {
 // ─── Impact Effects ──────────────────────────────────────────────────────────
 
 function triggerImpact(x, y, force) {
-  // Screen shake -- scaled to force
   if (force > 0.3) {
     shakeFrames    = Math.floor(4 + force * 10);
     shakeMagnitude = Math.min(force * 14, 18);
   }
-
-  // Hit-stop -- brief freeze on big hits
   if (force > 0.6) {
     hitStopFrames = Math.floor(force * 5);
   }
-
-  // Expanding ring flash
   impactFlashes.push({
     x, y,
     radius:  10,
@@ -148,8 +139,6 @@ function triggerImpact(x, y, force) {
     decay:   0.07 + (1 - force) * 0.04,
     color:   force > 0.7 ? '#FFFFFF' : '#FFD700',
   });
-
-  // Second ring for heavy hits
   if (force > 0.5) {
     impactFlashes.push({
       x, y,
@@ -190,17 +179,15 @@ function applyScreenShake() {
   const dy = (Math.random() - 0.5) * shakeMagnitude;
   ctx.translate(dx, dy);
   shakeFrames--;
-  shakeMagnitude *= 0.82; // decay shake
+  shakeMagnitude *= 0.82;
 }
 
 // ─── Arena Rendering ─────────────────────────────────────────────────────────
 
 function drawArena() {
-  // Background
   ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, 0, SIZE, SIZE);
 
-  // Bowl vignette -- dark toward edges, lighter at center
   const vignette = ctx.createRadialGradient(CX, CY, RADIUS * 0.1, CX, CY, RADIUS * 1.1);
   vignette.addColorStop(0,   'rgba(60,45,30,0.0)');
   vignette.addColorStop(0.6, 'rgba(20,15,10,0.3)');
@@ -211,24 +198,20 @@ function drawArena() {
   ctx.fillStyle = vignette;
   ctx.fill();
 
-  // Canvas cloth texture (fine grid suggests weave)
   _drawClothTexture();
 
-  // Bowl rim
   ctx.beginPath();
   ctx.arc(CX, CY, RADIUS, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(180,150,100,0.55)';
   ctx.lineWidth   = 3;
   ctx.stroke();
 
-  // Outer rim highlight
   ctx.beginPath();
   ctx.arc(CX, CY, RADIUS + 6, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(100,80,50,0.3)';
   ctx.lineWidth   = 8;
   ctx.stroke();
 
-  // Subtle center marker
   ctx.beginPath();
   ctx.arc(CX, CY, 4, 0, Math.PI * 2);
   ctx.fillStyle = 'rgba(180,150,100,0.18)';
@@ -260,18 +243,53 @@ function _drawClothTexture() {
   ctx.restore();
 }
 
+// ─── Motion Trails ───────────────────────────────────────────────────────────
+
+function drawMotionTrails() {
+  trailHistory.forEach((trail, id) => {
+    if (trail.length < 2) return;
+
+    const inst = liveInstances.find(i => `${i.owner}_${i.defId}` === id);
+    if (!inst || !inst.alive) return;
+
+    const [r, g, b] = _hexToRgb(inst.def.color);
+
+    for (let i = 0; i < trail.length; i++) {
+      const pos    = trail[i];
+      const age    = i / trail.length;
+      const alpha  = (1 - age) * 0.22;
+      const radius = inst.def.radius * (1 - age * 0.4);
+
+      if (alpha < 0.02) continue;
+
+      ctx.save();
+      ctx.globalAlpha = alpha * inst.opacity;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fill();
+      ctx.restore();
+    }
+  });
+}
+
+function _hexToRgb(hex) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return [r, g, b];
+}
+
 // ─── Top Rendering ───────────────────────────────────────────────────────────
 
 function drawAllTops() {
   for (const inst of liveInstances) {
     if (!inst.launched && inst.owner === 'player') {
-      // Draw player top at launch position (pre-launch preview)
       const pos = _playerLaunchPos();
       _drawTopAt(inst, pos.x, pos.y, 0, false, 0);
       continue;
     }
     if (!inst.launched && inst.owner === 'cpu') {
-      // CPU top not yet launched -- draw during animation only
       if (cpuAnimating) {
         const pos  = _cpuLaunchPos();
         const prog = cpuAnimProgress;
@@ -289,7 +307,6 @@ function drawAllTops() {
     const x = inst.body.position.x;
     const y = inst.body.position.y - (pstate ? pstate.jumpOffset : 0);
 
-    // Tilt indicator during player drag
     const gs       = Game.getGameState();
     const showTilt = (gs.phase === 'player_launch' && input.dragging && inst.owner === 'player');
     const tiltAmt  = showTilt ? _currentTiltAmount() : 0;
@@ -317,7 +334,6 @@ function drawLaunchIndicator() {
   const dist  = Math.hypot(dx, dy);
   if (dist < 5) return;
 
-  // Dashed aim line
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.3)';
   ctx.lineWidth   = 1.5;
@@ -328,7 +344,6 @@ function drawLaunchIndicator() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Arrow tip
   const angle = Math.atan2(dy, dx);
   ctx.translate(input.currentX, input.currentY);
   ctx.rotate(angle);
@@ -343,18 +358,13 @@ function drawLaunchIndicator() {
   ctx.restore();
 }
 
-// ─── Mouse Input ─────────────────────────────────────────────────────────────
-
-// ─── Launch Logic (Button-based, v0.1) ──────────────────────────────────────
-// Drag mechanic deferred -- tops launch automatically with good default params.
-// Player just presses the Launch button in the UI panel.
+// ─── Launch Logic ────────────────────────────────────────────────────────────
 
 function handlePlayerLaunchButton() {
   const gs = Game.getGameState();
   if (gs.phase !== 'player_launch') return;
 
   const pos       = _playerLaunchPos();
-  // Slight random angle variation so tops don't always meet perfectly head-on
   const spread    = (Math.random() - 0.5) * 0.3;
   const aimAngle  = -Math.PI / 2 + spread;
   const spinSpeed = 0.88;
@@ -362,7 +372,7 @@ function handlePlayerLaunchButton() {
   const result = Game.playerLaunch(aimAngle, spinSpeed);
   if (!result) return;
 
-  const speed  = 5.5 + Math.random() * 1.5;   // fast enough for impact, bowl contains them
+  const speed   = 5.5 + Math.random() * 1.5;
   const finalVx = Math.cos(result.angle) * speed;
   const finalVy = Math.sin(result.angle) * speed;
 
@@ -380,13 +390,13 @@ function _mapVelocityToSpin(speed) {
   if (speed < VEL_SWEET_LOW)  return _lerp(0.1, 0.65, (speed - VEL_MIN) / (VEL_SWEET_LOW - VEL_MIN));
   if (speed < VEL_SWEET_HIGH) return _lerp(0.65, 1.0,  (speed - VEL_SWEET_LOW) / (VEL_SWEET_HIGH - VEL_SWEET_LOW));
   if (speed < VEL_MAX)        return _lerp(1.0, 0.7,   (speed - VEL_SWEET_HIGH) / (VEL_MAX - VEL_SWEET_HIGH));
-  return 0.45; // overshoot
+  return 0.45;
 }
 
 function _classifyLaunch(speed, curve) {
-  if (speed < LAUNCH.VEL_MIN)   return 'miss';
-  if (speed > LAUNCH.VEL_MAX)   return 'miss';
-  if (curve > LAUNCH.CURVE_MISS) return 'miss';
+  if (speed < LAUNCH.VEL_MIN)    return 'miss';
+  if (speed > LAUNCH.VEL_MAX)    return 'miss';
+  if (curve > LAUNCH.CURVE_MISS)  return 'miss';
   if (curve > LAUNCH.CURVE_STEEP) return 'steep';
   if (curve > LAUNCH.CURVE_TILT)  return 'tilt';
   return 'good';
@@ -396,7 +406,6 @@ function _measureCurvature() {
   const path = input.path;
   if (path.length < 3) return 0;
 
-  // Measure total lateral deviation from straight line (start → end)
   const start = path[0];
   const end   = path[path.length - 1];
   const lineLen = Math.hypot(end.x - start.x, end.y - start.y);
@@ -404,7 +413,6 @@ function _measureCurvature() {
 
   let maxDev = 0;
   for (let i = 1; i < path.length - 1; i++) {
-    // Distance from point to line
     const dx  = end.x - start.x;
     const dy  = end.y - start.y;
     const dev = Math.abs(dy * path[i].x - dx * path[i].y + end.x * start.y - end.y * start.x) / lineLen;
@@ -419,7 +427,6 @@ function _currentTiltAmount() {
 }
 
 function _showMissEffect(pos) {
-  // Brief flash at launch position to indicate miss
   particles.push({
     x: pos.x, y: pos.y,
     vx: 0, vy: -2,
@@ -427,7 +434,6 @@ function _showMissEffect(pos) {
     size: 12,
     color: 'rgba(255,100,50,0.7)',
   });
-  // UI feedback handled in drawHUD
   _setStatusMessage('ミス！', 90);
 }
 
@@ -447,7 +453,6 @@ function _updateCpuAnimation() {
   if (cpuAnimProgress >= 1) {
     cpuAnimating    = false;
     cpuAnimProgress = 1;
-    // Actually launch the CPU top into physics world
     const p    = _cpuLaunchParams;
     const inst = Game.getGameState().cpuTop;
     if (inst && p) {
@@ -458,8 +463,8 @@ function _updateCpuAnimation() {
 
 // ─── HUD ─────────────────────────────────────────────────────────────────────
 
-let _statusMessage     = '';
-let _statusFrames      = 0;
+let _statusMessage = '';
+let _statusFrames  = 0;
 
 function _setStatusMessage(msg, frames) {
   _statusMessage = msg;
@@ -469,7 +474,6 @@ function _setStatusMessage(msg, frames) {
 function drawHUD() {
   const gs = Game.getGameState();
 
-  // Status message (miss, win, etc.)
   if (_statusFrames > 0) {
     const alpha = Math.min(1, _statusFrames / 20);
     ctx.save();
@@ -482,7 +486,6 @@ function drawHUD() {
     _statusFrames--;
   }
 
-  // Phase prompt
   ctx.font      = '14px monospace';
   ctx.fillStyle = 'rgba(200,180,140,0.8)';
   ctx.textAlign = 'left';
@@ -500,11 +503,9 @@ function drawHUD() {
   }
   ctx.fillText(prompt, 16, SIZE - 16);
 
-  // Player skill indicator
   ctx.textAlign = 'right';
   ctx.fillText(`スキル: ${gs.playerSkill}`, SIZE - 16, SIZE - 16);
 
-  // Top name labels near tops
   _drawTopLabels();
 }
 
@@ -530,14 +531,12 @@ function _drawTopLabels() {
 }
 
 function _drawResultScreen(gs) {
-  // Semi-transparent overlay
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   ctx.textAlign = 'center';
 
-  // Result text
   let line1, line2, color;
   if (gs.result === 'player_win') {
     line1 = 'WINNER!';
@@ -567,7 +566,6 @@ function _drawResultScreen(gs) {
 
   ctx.restore();
 
-  // Show restart button in panel
   const restartBtn = document.getElementById('restart-btn');
   if (restartBtn) {
     restartBtn.classList.remove('hidden');
@@ -597,24 +595,40 @@ function _cpuLaunchPos() {
 // ─── Game Loop ───────────────────────────────────────────────────────────────
 
 function gameLoop() {
-  // Clear
   ctx.clearRect(0, 0, SIZE, SIZE);
 
-  // Draw arena
   drawArena();
 
-  // Physics update -- skip frames during hit-stop
   const gs = Game.getGameState();
+
   if (hitStopFrames > 0) {
     hitStopFrames--;
   } else if (gs.phase === 'battle' || gs.phase === 'cpu_launch') {
     Physics.updatePhysics(liveInstances);
+
+    // Update motion trail history
+    for (const inst of liveInstances) {
+      if (!inst.launched || !inst.body) continue;
+      const id  = `${inst.owner}_${inst.defId}`;
+      const vel = Math.hypot(inst.body.velocity.x, inst.body.velocity.y);
+
+      if (vel >= TRAIL_VEL_THRESH) {
+        if (!trailHistory.has(id)) trailHistory.set(id, []);
+        const trail = trailHistory.get(id);
+        trail.unshift({ x: inst.body.position.x, y: inst.body.position.y });
+        if (trail.length > TRAIL_LENGTH) trail.pop();
+      } else {
+        if (trailHistory.has(id)) {
+          const trail = trailHistory.get(id);
+          if (trail.length > 0) trail.pop();
+          else trailHistory.delete(id);
+        }
+      }
+    }
   }
 
-  // CPU launch animation
   _updateCpuAnimation();
 
-  // CPU launch trigger
   if (gs.phase === 'cpu_launch') {
     const params = Game.updateCpuLaunch();
     if (params) {
@@ -622,7 +636,6 @@ function gameLoop() {
     }
   }
 
-  // Battle update
   if (gs.phase === 'battle') {
     const result = Game.updateBattle(liveInstances);
     if (result) {
@@ -633,7 +646,6 @@ function gameLoop() {
       );
     }
 
-    // Remove fully faded dead tops from physics
     for (const inst of liveInstances) {
       if (!inst.alive && inst.opacity <= 0 && inst.body) {
         Physics.removeTopFromWorld(inst);
@@ -642,27 +654,23 @@ function gameLoop() {
     }
   }
 
-  // Screen shake -- applied before drawing everything
   ctx.save();
   applyScreenShake();
 
-  // Draw tops
+  // Motion trails drawn behind tops
+  drawMotionTrails();
+
   drawAllTops();
 
-  // Draw particles
   updateParticles();
   drawParticles();
 
-  // Draw impact flash rings
   updateImpactFlashes();
   drawImpactFlashes();
 
-  ctx.restore(); // end screen shake transform
+  ctx.restore();
 
-  // Draw aim indicator
   drawLaunchIndicator();
-
-  // Draw HUD
   drawHUD();
 
   requestAnimationFrame(gameLoop);
@@ -671,7 +679,6 @@ function gameLoop() {
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 function initGame() {
-  // Reset physics world
   Physics.resetPhysics();
   particles       = [];
   liveInstances   = [];
@@ -684,16 +691,14 @@ function initGame() {
   shakeMagnitude  = 0;
   hitStopFrames   = 0;
   impactFlashes   = [];
+  trailHistory.clear();
 
-  // Reset launch button
   const launchBtn = document.getElementById('launch-btn');
   if (launchBtn) launchBtn.disabled = false;
 
-  // Hide restart button
   const restartBtn = document.getElementById('restart-btn');
   if (restartBtn) restartBtn.classList.add('hidden');
 
-  // Show top selection UI (defined in index.html)
   if (typeof showTopSelection === 'function') {
     showTopSelection((playerTopId, cpuTopId) => {
       const { playerInstance, cpuInstance } = Game.startMatch(
@@ -704,7 +709,6 @@ function initGame() {
       liveInstances = [playerInstance, cpuInstance];
     });
   } else {
-    // Fallback: auto-start with nomaru vs hajiki for testing
     const { playerInstance, cpuInstance } = Game.startMatch(
       'nomaru', 'hajiki', Game.GAME.MODE_MATCH
     );
@@ -712,11 +716,10 @@ function initGame() {
   }
 }
 
-// ─── Collision Callback (registered with Physics) ───────────────────────────
+// ─── Collision Callback ──────────────────────────────────────────────────────
 
 Physics.initPhysics({
   onTopDied: (instance) => {
-    // Nothing extra needed here; game.js handles win logic
   },
   onCollision: (instA, instB, force) => {
     if (instA.body && instB.body) {

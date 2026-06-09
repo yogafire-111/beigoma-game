@@ -75,50 +75,35 @@ const TOP_ORDER = ['nomaru', 'riki', 'maru', 'hajiki'];
 
 // ─── Alignment ──────────────────────────────────────────────────────────────
 
-// Returns a random tip-to-CoM alignment float in [0.8, 1.0]
-// 1.0 = perfect, lower = more wobble and faster spin decay
 function randomAlignment() {
   return 0.8 + Math.random() * 0.2;
 }
 
 // ─── Top Instance Factory ───────────────────────────────────────────────────
 
-// Creates a live top instance from a definition.
-// owner: 'player' | 'cpu'
 function createTopInstance(defId, owner) {
   const def = TOP_DEFS[defId];
   if (!def) throw new Error(`Unknown top id: ${defId}`);
 
   return {
-    // identity
     defId,
     owner,
-    def,                          // reference to static def
-
-    // physics state (populated by physics.js when body is created)
-    body:        null,            // Matter.js body
-    spinSpeed:   0,               // current spin rate (rad/s equivalent, 0–1 normalized)
-    angle:       0,               // current visual rotation (radians)
-    tilt:        0,               // 0 = upright, 1 = fallen (for visual wobble)
-    sideContact: false,           // true when sides are rubbing canvas
-
-    // alignment (randomized at match start)
+    def,
+    body:        null,
+    spinSpeed:   0,
+    angle:       0,
+    tilt:        0,
+    sideContact: false,
     alignment:   randomAlignment(),
-
-    // match tracking
-    hasContacted: false,          // has this top touched an opponent?
-    alive:        true,           // false once spin < threshold and falling
-    opacity:      1.0,            // for fade-out
-
-    // launch state
+    hasContacted: false,
+    alive:        true,
+    opacity:      1.0,
     launched:    false,
   };
 }
 
 // ─── Drawing ────────────────────────────────────────────────────────────────
 
-// Draw a hexagon path centered at (0,0) with given radius.
-// ctx should already be translated/rotated to top center.
 function hexPath(ctx, r) {
   ctx.beginPath();
   for (let i = 0; i < 6; i++) {
@@ -130,7 +115,6 @@ function hexPath(ctx, r) {
   ctx.closePath();
 }
 
-// Draw ribbed lines pattern for りき (riki)
 function drawRikiRibs(ctx, r, angle) {
   ctx.save();
   ctx.rotate(angle);
@@ -147,7 +131,6 @@ function drawRikiRibs(ctx, r, angle) {
   ctx.restore();
 }
 
-// Draw slash marks pattern for はじき (hajiki)
 function drawHajikiSlashes(ctx, r, angle) {
   ctx.save();
   ctx.rotate(angle);
@@ -167,8 +150,6 @@ function drawHajikiSlashes(ctx, r, angle) {
   ctx.restore();
 }
 
-// Draw radial tick marks on rim (spin indicator)
-// tickPhase: driven by accumulated rotation so ticks appear to spin
 function drawRimTicks(ctx, r, tickPhase, spinSpeed) {
   const tickCount = 12;
   const alpha = 0.4 + spinSpeed * 0.55;
@@ -188,43 +169,145 @@ function drawRimTicks(ctx, r, tickPhase, spinSpeed) {
   ctx.restore();
 }
 
-// Draw motion blur ring (spin indicator)
-// blurAlpha driven by spinSpeed
+// ─── Spin Blur (arc streaks) ─────────────────────────────────────────────────
+// Replaces the old radial gradient + arc approach.
+// At low spin: invisible. At mid spin: faint short arcs.
+// At high spin: long bright arcs that merge into a near-disc blur.
+
 function drawSpinBlur(ctx, r, spinSpeed, angle) {
-  if (spinSpeed < 0.08) return;
+  if (spinSpeed < 0.05) return;
 
-  // Outer blur ring
-  const ringAlpha = Math.min(spinSpeed * 0.7, 0.55);
-  const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.05);
-  grad.addColorStop(0,   `rgba(255,255,255,0)`);
-  grad.addColorStop(0.5, `rgba(255,255,255,${ringAlpha * 0.4})`);
-  grad.addColorStop(0.85,`rgba(255,255,255,${ringAlpha})`);
-  grad.addColorStop(1,   `rgba(255,255,255,0)`);
-  ctx.beginPath();
-  ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fillStyle = grad;
-  ctx.fill();
+  const streakCount = 6;
+  const maxArcLen   = Math.PI * 0.75;                        // max arc length at full spin
+  const arcLen      = maxArcLen * Math.min(spinSpeed / 0.7, 1.0);
+  const baseAlpha   = Math.min(spinSpeed * 0.9, 0.72);
+  const lineWidth   = r * 0.32;
 
-  // Rotating blur streaks -- arcs that smear around the body
-  if (spinSpeed > 0.15) {
-    const streakAlpha = Math.min((spinSpeed - 0.15) * 1.2, 0.6);
-    const streakCount = 4;
-    ctx.save();
-    ctx.rotate(angle);
-    for (let i = 0; i < streakCount; i++) {
-      const startAngle = (Math.PI * 2 / streakCount) * i;
-      const arcLen     = Math.PI * 0.38 * spinSpeed;
+  ctx.save();
+  ctx.rotate(angle);
+
+  for (let i = 0; i < streakCount; i++) {
+    const startAngle = (Math.PI * 2 / streakCount) * i;
+    const endAngle   = startAngle + arcLen;
+
+    // Each streak fades from bright at head to transparent at tail
+    const grad = ctx.createConicalGradient
+      ? null   // not widely supported, use fallback
+      : null;
+
+    // Fallback: draw arc in segments with decreasing alpha
+    const segments = 6;
+    for (let s = 0; s < segments; s++) {
+      const t0 = s / segments;
+      const t1 = (s + 1) / segments;
+      const a0 = startAngle + arcLen * t0;
+      const a1 = startAngle + arcLen * t1;
+      // Head is brightest, tail fades
+      const segAlpha = baseAlpha * (1 - t0 * 0.85);
+
       ctx.beginPath();
-      ctx.arc(0, 0, r * 0.72, startAngle, startAngle + arcLen);
-      ctx.strokeStyle = `rgba(255,255,255,${streakAlpha})`;
-      ctx.lineWidth   = r * 0.28;
+      ctx.arc(0, 0, r * 0.72, a0, a1);
+      ctx.strokeStyle = `rgba(255,255,255,${segAlpha})`;
+      ctx.lineWidth   = lineWidth * (1 - t0 * 0.4);
       ctx.stroke();
     }
-    ctx.restore();
   }
+
+  // At high spin, add a soft outer glow ring to suggest the body blurring into a disc
+  if (spinSpeed > 0.45) {
+    const glowAlpha = Math.min((spinSpeed - 0.45) * 1.1, 0.45);
+    const grad = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.05);
+    grad.addColorStop(0,    `rgba(255,255,255,0)`);
+    grad.addColorStop(0.65, `rgba(255,255,255,${glowAlpha * 0.3})`);
+    grad.addColorStop(0.88, `rgba(255,255,255,${glowAlpha})`);
+    grad.addColorStop(1,    `rgba(255,255,255,0)`);
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+
+  ctx.restore();
 }
 
-// Draw shadow at base (depth cue)
+// ─── Glitter ──────────────────────────────────────────────────────────────────
+// Fixed points distributed across the top surface.
+// Each point has a catch angle -- when the top's rotation passes through it,
+// the point briefly flashes white/gold, simulating light catching glitter.
+// Color-independent: same effect on all tops.
+
+// Pre-generate glitter point layouts per top type.
+// Points are stored as { r: fraction of radius, a: angle offset, catchWidth }
+const GLITTER_POINTS = _generateGlitterPoints(11);
+
+function _generateGlitterPoints(count) {
+  const pts = [];
+  // Use a sunflower/Fibonacci spiral for even distribution
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  for (let i = 0; i < count; i++) {
+    const t    = i / count;
+    const dist = 0.2 + t * 0.72;           // keep away from very center and edge
+    const ang  = golden * i;
+    pts.push({
+      rx:         Math.cos(ang) * dist,    // relative x (fraction of radius)
+      ry:         Math.sin(ang) * dist,    // relative y
+      catchWidth: 0.18 + Math.random() * 0.22,  // how wide the flash window is
+      phase:      Math.random() * Math.PI * 2,   // individual phase offset
+      size:       1.2 + Math.random() * 1.8,     // point size in px
+      gold:       Math.random() < 0.4,           // gold vs white
+    });
+  }
+  return pts;
+}
+
+function drawGlitter(ctx, r, spinSpeed, angle) {
+  if (spinSpeed < 0.08) return;
+
+  // Overall glitter brightness scales with spin -- fast spin = more light catches
+  const masterAlpha = Math.min((spinSpeed - 0.08) / 0.5, 1.0);
+  if (masterAlpha <= 0) return;
+
+  ctx.save();
+
+  for (const pt of GLITTER_POINTS) {
+    const px = pt.rx * r;
+    const py = pt.ry * r;
+
+    // The catch angle rotates with the top. Flash when angle mod 2π is near catchAngle.
+    const catchAngle = pt.phase;
+    const currentAngle = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const diff = Math.abs(currentAngle - catchAngle);
+    const wrap = Math.min(diff, Math.PI * 2 - diff);
+
+    if (wrap > pt.catchWidth) continue;
+
+    // Flash intensity: peak at center of catch window, falls off toward edges
+    const intensity = Math.pow(1 - wrap / pt.catchWidth, 2) * masterAlpha;
+    if (intensity < 0.05) continue;
+
+    const color = pt.gold
+      ? `rgba(255,230,120,${intensity})`
+      : `rgba(255,255,255,${intensity})`;
+
+    // Inner glow + bright center
+    ctx.beginPath();
+    ctx.arc(px, py, pt.size * 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = pt.gold
+      ? `rgba(255,210,80,${intensity * 0.3})`
+      : `rgba(255,255,255,${intensity * 0.25})`;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(px, py, pt.size, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+// ─── Shadow ──────────────────────────────────────────────────────────────────
+
 function drawShadow(ctx, r) {
   const grad = ctx.createRadialGradient(3, 4, r * 0.1, 3, 4, r * 1.1);
   grad.addColorStop(0,   'rgba(0,0,0,0.28)');
@@ -235,11 +318,10 @@ function drawShadow(ctx, r) {
   ctx.fill();
 }
 
-// Tilt indicator ring -- shown during launch drag
-// tiltAmount: 0 (flat) to 1 (very steep / will fall over)
+// ─── Tilt Ring ───────────────────────────────────────────────────────────────
+
 function drawTiltRing(ctx, r, tiltAmount) {
   const ringR = r + 8;
-  // Color shifts green -> yellow -> red with tilt
   const red   = Math.min(255, Math.round(tiltAmount * 2 * 255));
   const green = Math.min(255, Math.round((1 - tiltAmount) * 2 * 255));
   ctx.beginPath();
@@ -251,12 +333,8 @@ function drawTiltRing(ctx, r, tiltAmount) {
   ctx.setLineDash([]);
 }
 
-// Main draw function for a top instance.
-// Call with ctx already translated to top's canvas position.
-// instance: top instance object
-// tickPhase: accumulated rotation angle (drives rim ticks visual)
-// showTilt: bool -- show tilt ring (during launch drag)
-// tiltAmount: 0–1
+// ─── Main Draw ───────────────────────────────────────────────────────────────
+
 function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   const { def, spinSpeed, angle, tilt, opacity } = instance;
   const r = def.radius;
@@ -267,7 +345,7 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   // Shadow
   drawShadow(ctx, r);
 
-  // Wobble skew: as tilt increases, squash the top slightly
+  // Wobble skew
   if (tilt > 0) {
     const skew = tilt * 0.25;
     ctx.transform(1, 0, skew, 1 - tilt * 0.1, 0, 0);
@@ -284,19 +362,16 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
     ctx.arc(0, 0, r, 0, Math.PI * 2);
   }
 
-  // Radial gradient for depth
   const bodyGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.05, 0, 0, r);
   bodyGrad.addColorStop(0, lighten(def.color, 0.35));
   bodyGrad.addColorStop(1, def.color);
   ctx.fillStyle = bodyGrad;
   ctx.fill();
 
-  // Edge stroke
   ctx.strokeStyle = darken(def.color, 0.3);
   ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // Pattern overlay
   if (def.id === 'riki')   drawRikiRibs(ctx, r, 0);
   if (def.id === 'hajiki') drawHajikiSlashes(ctx, r, 0);
 
@@ -304,13 +379,16 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   ctx.save();
   ctx.globalAlpha = opacity;
 
-  // Spin blur (not rotated with body -- streaks rotate independently)
+  // Spin blur (arc streaks)
   drawSpinBlur(ctx, r, spinSpeed, tickPhase);
+
+  // Glitter
+  drawGlitter(ctx, r, spinSpeed, tickPhase);
 
   // Rim ticks
   drawRimTicks(ctx, r, tickPhase, spinSpeed);
 
-  // Tilt indicator ring (during launch)
+  // Tilt ring
   if (showTilt) {
     drawTiltRing(ctx, r, tiltAmount);
   }
@@ -319,8 +397,6 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
 }
 
 // ─── Three-View Display ──────────────────────────────────────────────────────
-// Draws top/front/side schematic for the selection panel.
-// Returns nothing; draws onto provided canvas element directly.
 
 function drawThreeView(canvas, defId) {
   const def = TOP_DEFS[defId];
@@ -334,7 +410,6 @@ function drawThreeView(canvas, defId) {
   const panelW = w / 3;
   const cx = panelW / 2;
 
-  // Labels
   ctx.font = '10px monospace';
   ctx.fillStyle = '#aaa';
   ctx.textAlign = 'center';
@@ -342,7 +417,6 @@ function drawThreeView(canvas, defId) {
   ctx.fillText('前',   cx + panelW,   14);
   ctx.fillText('横',   cx + panelW*2, 14);
 
-  // ── Top view (birds eye) ──
   ctx.save();
   ctx.translate(cx, h / 2 + 4);
   const r = def.radius;
@@ -359,31 +433,27 @@ function drawThreeView(canvas, defId) {
   ctx.stroke();
   ctx.restore();
 
-  // ── Front view (silhouette) ──
   ctx.save();
   ctx.translate(cx + panelW, h / 2 + 4);
   drawSideProfile(ctx, def, false);
   ctx.restore();
 
-  // ── Side view ──
   ctx.save();
   ctx.translate(cx + panelW * 2, h / 2 + 4);
   drawSideProfile(ctx, def, true);
   ctx.restore();
 }
 
-// Draw a simplified side/front profile silhouette
 function drawSideProfile(ctx, def, rotated) {
   const r  = def.radius;
-  const h2 = r * 1.1;  // half-height of top body
+  const h2 = r * 1.1;
 
   ctx.save();
-  if (rotated) ctx.rotate(Math.PI / 6); // slight angle for side view
+  if (rotated) ctx.rotate(Math.PI / 6);
 
-  // Body outline -- tapered trapezoid
   ctx.beginPath();
-  const topW   = def.profile === 'circle' ? r * 0.9 : r * 0.95;
-  const bottomW = r * 0.12; // tapers to tip
+  const topW    = def.profile === 'circle' ? r * 0.9 : r * 0.95;
+  const bottomW = r * 0.12;
   ctx.moveTo(-topW, -h2);
   ctx.lineTo( topW, -h2);
   ctx.lineTo( bottomW,  h2 * 0.7);
@@ -395,7 +465,6 @@ function drawSideProfile(ctx, def, rotated) {
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // Tip
   if (def.tipType === 'flat') {
     ctx.beginPath();
     ctx.moveTo(-bottomW * 1.8, h2 * 0.7);
@@ -404,7 +473,6 @@ function drawSideProfile(ctx, def, rotated) {
     ctx.lineWidth = 2.5;
     ctx.stroke();
   } else {
-    // pointed tip
     ctx.beginPath();
     ctx.moveTo(-bottomW, h2 * 0.7);
     ctx.lineTo(0, h2 * 1.0);
@@ -439,7 +507,6 @@ function darken(hex, amount) {
 
 // ─── Exports ─────────────────────────────────────────────────────────────────
 
-// For plain-script (non-module) use, attach to window
 if (typeof window !== 'undefined') {
   window.Tops = {
     TOP_DEFS,
