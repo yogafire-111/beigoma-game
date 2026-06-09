@@ -66,22 +66,22 @@ const TRAIL_VEL_THRESH = 3.0;
 // ─── Spark Particle System ───────────────────────────────────────────────────
 
 function spawnSparks(x, y, force) {
-  const count = Math.floor(20 + force * 80);
+  const count = Math.floor(24 + force * 90);
   for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 8 + Math.random() * force * 28;
-    const isBig = Math.random() < 0.25;
+    const angle  = Math.random() * Math.PI * 2;
+    const speed  = 14 + Math.random() * force * 38;
     const isGold = Math.random() < 0.5;
     particles.push({
       x, y,
       vx:    Math.cos(angle) * speed,
       vy:    Math.sin(angle) * speed,
       life:  1.0,
-      decay: isBig ? 0.016 + Math.random() * 0.014 : 0.024 + Math.random() * 0.028,
-      size:  isBig ? 5.5 + Math.random() * 6.0 : 2.5 + Math.random() * 4.5,
+      decay: 0.038 + Math.random() * 0.032,
+      size:  1.0 + Math.random() * 1.5,
       color: isGold
         ? (Math.random() < 0.5 ? '#FFD700' : '#FFAA00')
         : (Math.random() < 0.5 ? '#FFFFFF' : '#FFFACC'),
+      isSpark: true,   // render as line segment
     });
   }
   // Large central flash
@@ -123,6 +123,17 @@ function drawParticles() {
       ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
       ctx.fillStyle = p.color;
       ctx.fill();
+    } else if (p.isSpark) {
+      // Line segment -- tail trails behind current position
+      const tailX = p.x - p.vx * 0.12;
+      const tailY = p.y - p.vy * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(tailX, tailY);
+      ctx.lineTo(p.x, p.y);
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth   = p.size * p.life;
+      ctx.lineCap     = 'round';
+      ctx.stroke();
     } else {
       ctx.fillStyle = p.color;
       ctx.beginPath();

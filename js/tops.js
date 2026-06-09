@@ -230,10 +230,16 @@ function drawAura(ctx, r, spinSpeed, tickPhase, topColor, alive) {
 }
 
 // ─── Spin Blur (inner arc streaks) ───────────────────────────────────────────
-// Inner white streaks close to the body -- always present above min spin.
+// Streaks are tinted to the top's color mixed with white for contrast.
 
-function drawSpinBlur(ctx, r, spinSpeed, angle) {
+function drawSpinBlur(ctx, r, spinSpeed, angle, topColor) {
   if (spinSpeed < 0.05) return;
+
+  // Mix top color 40% with white 60% for tinted-but-readable streaks
+  const [tr, tg, tb] = hexToRgb(topColor);
+  const mr = Math.round(tr * 0.4 + 255 * 0.6);
+  const mg = Math.round(tg * 0.4 + 255 * 0.6);
+  const mb = Math.round(tb * 0.4 + 255 * 0.6);
 
   const streakCount = 6;
   const maxArcLen   = Math.PI * 1.1;
@@ -255,20 +261,20 @@ function drawSpinBlur(ctx, r, spinSpeed, angle) {
 
       ctx.beginPath();
       ctx.arc(0, 0, r * 0.74, a0, a1);
-      ctx.strokeStyle = `rgba(255,255,255,${segAlpha})`;
+      ctx.strokeStyle = `rgba(${mr},${mg},${mb},${segAlpha})`;
       ctx.lineWidth   = lineWidth * (1 - t0 * 0.5);
       ctx.stroke();
     }
   }
 
-  // White glow disc at high spin
+  // Tinted glow disc at high spin
   if (spinSpeed > 0.4) {
     const glowAlpha = Math.min((spinSpeed - 0.4) * 1.3, 0.55);
     const grad = ctx.createRadialGradient(0, 0, r * 0.45, 0, 0, r * 1.05);
-    grad.addColorStop(0,    `rgba(255,255,255,0)`);
-    grad.addColorStop(0.6,  `rgba(255,255,255,${glowAlpha * 0.3})`);
-    grad.addColorStop(0.88, `rgba(255,255,255,${glowAlpha})`);
-    grad.addColorStop(1,    `rgba(255,255,255,0)`);
+    grad.addColorStop(0,    `rgba(${mr},${mg},${mb},0)`);
+    grad.addColorStop(0.6,  `rgba(${mr},${mg},${mb},${glowAlpha * 0.3})`);
+    grad.addColorStop(0.88, `rgba(${mr},${mg},${mb},${glowAlpha})`);
+    grad.addColorStop(1,    `rgba(${mr},${mg},${mb},0)`);
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
     ctx.fillStyle = grad;
@@ -451,7 +457,7 @@ function drawTop(ctx, instance, tickPhase, showTilt, tiltAmount) {
   ctx.globalAlpha = opacity;
 
   // Inner spin blur
-  drawSpinBlur(ctx, r, spinSpeed, tickPhase);
+  drawSpinBlur(ctx, r, spinSpeed, tickPhase, def.color);
 
   // Glitter
   drawGlitter(ctx, r, spinSpeed, tickPhase);
