@@ -14,7 +14,7 @@ const PHYSICS = {
   BOWL_FORCE_MAX:        0.004,   // baked from debug (was 0.0022)
   BOWL_DAMPING:          0.002,   // baked from debug (was 0.008)
   BOWL_CENTER_DEAD:      0.08,
-  BOWL_LATERAL_DAMP_RATIO: 0.4,  // tangential damping as fraction of radial damping
+  BOWL_LATERAL_DAMP_RATIO: 0.001,  // tangential damping as fraction of radial damping
 
   // Out of bounds
   EJECT_RADIUS:     1.02,
