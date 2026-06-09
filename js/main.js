@@ -108,7 +108,6 @@ function updateParticles() {
     const p = particles[i];
     p.x    += p.vx;
     p.y    += p.vy;
-    p.vy   += 0.12;
     p.life -= p.decay;
     if (p.life <= 0) particles.splice(i, 1);
   }

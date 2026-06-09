@@ -152,31 +152,50 @@ function drawHajikiSlashes(ctx, r, angle) {
 
 // ─── Wavy Aura (outer energy halo) ──────────────────────────────────────────
 // Drawn in a separate pass BEFORE top bodies so bodies render on top.
-// auraPhase: independent timer, not tied to spin rotation.
+// Shape rotates with tickPhase so it feels physically connected to the top.
+// A bright white inner ring ensures visibility against any bowl color.
 // Only visible while alive -- zeroed out on ejection/death.
 
-function drawAura(ctx, r, spinSpeed, auraPhase, topColor, alive) {
+function drawAura(ctx, r, spinSpeed, tickPhase, topColor, alive) {
   if (!alive) return;
   if (spinSpeed < 0.15) return;
 
   const [tr, tg, tb] = hexToRgb(topColor);
   const strength     = Math.min((spinSpeed - 0.15) / 0.5, 1.0);
-  const outerR       = r * (1.1 + spinSpeed * 1.3);
+  const outerR       = r * (1.12 + spinSpeed * 1.2);
   const wavePoints   = 64;
-  const waveAmp      = r * 0.18 * strength;
-  const waveFreq     = 5;   // number of waves around the circumference
-  const waveFreq2    = 7;   // second harmonic for more organic shape
-  const alpha        = strength * 0.55;
+  const waveAmp      = r * 0.16 * strength;
+  const waveFreq     = 5;
+  const waveFreq2    = 7;
+  const colorAlpha   = strength * 0.55;
 
   ctx.save();
 
-  // Outer wavy fill -- soft diffuse glow
+  // ── White inner glow ring -- always visible regardless of top color ──
+  const whiteR = r * (1.04 + spinSpeed * 0.18);
+  ctx.beginPath();
+  ctx.arc(0, 0, whiteR, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,255,255,${strength * 0.7})`;
+  ctx.lineWidth   = 2.5 * strength;
+  ctx.stroke();
+
+  // Soft white halo just outside body
+  const whiteGrad = ctx.createRadialGradient(0, 0, r * 0.85, 0, 0, r * 1.35);
+  whiteGrad.addColorStop(0,   `rgba(255,255,255,0)`);
+  whiteGrad.addColorStop(0.5, `rgba(255,255,255,${strength * 0.18})`);
+  whiteGrad.addColorStop(1,   `rgba(255,255,255,0)`);
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 1.35, 0, Math.PI * 2);
+  ctx.fillStyle = whiteGrad;
+  ctx.fill();
+
+  // ── Outer wavy colored aura -- rotates with tickPhase ──
   ctx.beginPath();
   for (let i = 0; i <= wavePoints; i++) {
-    const t   = (i / wavePoints) * Math.PI * 2;
+    const t    = (i / wavePoints) * Math.PI * 2;
     const wave =
-      Math.sin(t * waveFreq  + auraPhase * 1.3) * waveAmp +
-      Math.sin(t * waveFreq2 + auraPhase * 0.9) * waveAmp * 0.45;
+      Math.sin(t * waveFreq  + tickPhase * 0.08) * waveAmp +
+      Math.sin(t * waveFreq2 + tickPhase * 0.05) * waveAmp * 0.45;
     const rad = outerR + wave;
     const x   = Math.cos(t) * rad;
     const y   = Math.sin(t) * rad;
@@ -186,28 +205,27 @@ function drawAura(ctx, r, spinSpeed, auraPhase, topColor, alive) {
 
   const grad = ctx.createRadialGradient(0, 0, r * 0.9, 0, 0, outerR + waveAmp);
   grad.addColorStop(0,    `rgba(${tr},${tg},${tb},0)`);
-  grad.addColorStop(0.35, `rgba(${tr},${tg},${tb},${alpha * 0.25})`);
-  grad.addColorStop(0.72, `rgba(${tr},${tg},${tb},${alpha * 0.65})`);
+  grad.addColorStop(0.35, `rgba(${tr},${tg},${tb},${colorAlpha * 0.25})`);
+  grad.addColorStop(0.72, `rgba(${tr},${tg},${tb},${colorAlpha * 0.65})`);
   grad.addColorStop(1,    `rgba(${tr},${tg},${tb},0)`);
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Second wavy ring -- slightly different phase for depth
+  // Wavy outline stroke
   ctx.beginPath();
-  const innerR = r * (1.02 + spinSpeed * 0.7);
   for (let i = 0; i <= wavePoints; i++) {
     const t    = (i / wavePoints) * Math.PI * 2;
     const wave =
-      Math.sin(t * waveFreq  + auraPhase * 1.7 + 1.0) * waveAmp * 0.5 +
-      Math.sin(t * waveFreq2 + auraPhase * 1.1 + 2.3) * waveAmp * 0.3;
-    const rad = innerR + wave;
+      Math.sin(t * waveFreq  + tickPhase * 0.08 + 1.0) * waveAmp * 0.55 +
+      Math.sin(t * waveFreq2 + tickPhase * 0.05 + 2.3) * waveAmp * 0.3;
+    const rad = outerR * 0.88 + wave;
     const x   = Math.cos(t) * rad;
     const y   = Math.sin(t) * rad;
     i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
   }
   ctx.closePath();
-  ctx.strokeStyle = `rgba(${tr},${tg},${tb},${alpha * 0.5})`;
-  ctx.lineWidth   = 2.5 * strength;
+  ctx.strokeStyle = `rgba(${tr},${tg},${tb},${colorAlpha * 0.55})`;
+  ctx.lineWidth   = 2.0 * strength;
   ctx.stroke();
 
   ctx.restore();
@@ -385,12 +403,12 @@ function drawTiltRing(ctx, r, tiltAmount) {
 
 function drawTopAura(ctx, instance, tickPhase) {
   if (!instance.launched) return;
-  const { def, spinSpeed, auraPhase, opacity, alive } = instance;
+  const { def, spinSpeed, opacity, alive } = instance;
   const r = def.radius;
 
   ctx.save();
   ctx.globalAlpha = opacity;
-  drawAura(ctx, r, spinSpeed, auraPhase || tickPhase, def.color, alive);
+  drawAura(ctx, r, spinSpeed, tickPhase, def.color, alive);
   ctx.restore();
 }
 
