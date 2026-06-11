@@ -836,11 +836,9 @@ function _updateTopReadout(inst, posId, velId, spinId, tiltId) {
 // ── Log hooks ─────────────────────────────────────────────────────────────────
 
 function installLogHooks() {
-  // Do NOT call Physics.initPhysics() here -- main.js already initialized it.
-  // Instead grab the callbacks main.js registered and wrap them.
   const existing = window._physicsCallbacks || {};
 
-  Physics.initPhysics({
+  Physics.setCallbacks({
     onTopDied: (instance) => {
       if (existing.onTopDied) existing.onTopDied(instance);
       const cause = instance.ejected     ? 'EJECTED'

@@ -80,6 +80,14 @@ function initPhysics(callbacks) {
   _attachCollisionHandler();
 }
 
+// Replace callbacks without reinitializing the engine.
+// Use this when a second script (e.g. debug.html) wants to intercept events.
+function setCallbacks(callbacks) {
+  if (callbacks.onTopDied)      onTopDied      = callbacks.onTopDied;
+  if (callbacks.onCollision)    onCollision    = callbacks.onCollision;
+  if (callbacks.onCornerStrike) onCornerStrike = callbacks.onCornerStrike;
+}
+
 function _buildArena() {
   arenaBodies = [];
 }
@@ -561,6 +569,7 @@ if (typeof window !== 'undefined') {
     PHYSICS,
     BODY_PARAMS,
     initPhysics,
+    setCallbacks,
     addTopToWorld,
     removeTopFromWorld,
     updatePhysics,
