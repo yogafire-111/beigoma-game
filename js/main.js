@@ -793,8 +793,10 @@ window.addEventListener('load', () => {
   // Sound.init() must be called on a user gesture.
   // We hook the confirm button and launch button -- whichever fires first.
   const _initSound = () => { Sound.init(); };
-  document.getElementById('confirm-btn').addEventListener('click', _initSound, { once: true });
-  document.getElementById('launch-btn').addEventListener('click',   _initSound, { once: true });
+  const _confirmBtn = document.getElementById('confirm-btn');
+  const _launchBtn  = document.getElementById('launch-btn');
+  if (_confirmBtn) _confirmBtn.addEventListener('click', _initSound, { once: true });
+  if (_launchBtn)  _launchBtn.addEventListener('click',  _initSound, { once: true });
 
   initGame();
   requestAnimationFrame(gameLoop);
