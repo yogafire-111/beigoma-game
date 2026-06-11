@@ -231,9 +231,10 @@ function _applyProximityPenalty(instances) {
       const minDist = instA.def.radius + instB.def.radius;
 
       if (dist < minDist) {
-        // Scale penalty by how deeply they overlap
+        // Flat penalty per frame of contact -- meaningful even at low overlap.
+        // Overlap scaling adds a little extra for deep locks.
         const overlap = (minDist - dist) / minDist;
-        const penalty = overlap * 0.003;
+        const penalty = 0.0012 + overlap * 0.003;
         instA.spinSpeed = Math.max(0, instA.spinSpeed - penalty);
         instB.spinSpeed = Math.max(0, instB.spinSpeed - penalty);
       }
