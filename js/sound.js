@@ -90,11 +90,11 @@ function _getNoiseBuffer() {
 // Call when a top is launched. Creates oscillator(s) and connects them.
 // Defers until AudioContext is running in case init() was just called.
 function startHum(instance) {
-  init();  // safe to call multiple times; no-op if already ready
-  if (!_ensureReady()) return;
-  // Small delay ensures AudioContext is fully running before we create nodes.
-  // Necessary when startHum is called on the same tick as init().
+  init();
+  console.log('[Sound] startHum called for', instance.owner, 'ctx state:', _ctx ? _ctx.state : 'no ctx', '_ready:', _ready);
+  if (!_ensureReady()) { console.log('[Sound] ensureReady failed'); return; }
   setTimeout(() => {
+    console.log('[Sound] setTimeout fired for', instance.owner, 'ctx state:', _ctx.state);
     if (_ctx.state === 'suspended') {
       _ctx.resume().then(() => _startHumNow(instance));
     } else {
@@ -104,6 +104,7 @@ function startHum(instance) {
 }
 
 function _startHumNow(instance) {
+  console.log('[Sound] _startHumNow for', instance.owner, instance.def.tipType);
   if (!_ready) return;
 
   const id      = _instanceId(instance);
