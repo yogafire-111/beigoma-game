@@ -73,7 +73,10 @@ function initPhysics(callbacks) {
   if (callbacks.onCollision)    onCollision    = callbacks.onCollision;
   if (callbacks.onCornerStrike) onCornerStrike = callbacks.onCornerStrike;
 
-  engine = Matter.Engine.create({ gravity: { x: 0, y: PHYSICS.GRAVITY_SCALE } });
+  engine = Matter.Engine.create({
+    gravity: { x: 0, y: PHYSICS.GRAVITY_SCALE },
+    enableSleeping: false,
+  });
   world  = engine.world;
 
   _buildArena();
@@ -208,6 +211,32 @@ function updatePhysics(instances) {
 
     if (!instance.alive) {
       instance.opacity = Math.max(0, instance.opacity - PHYSICS.FADE_RATE);
+    }
+  }
+
+  // Proximity contact penalty -- catches silent grinding that collisionActive misses.
+  // If two live tops are overlapping, apply a small spin loss each frame.
+  _applyProximityPenalty(instances);
+}
+
+function _applyProximityPenalty(instances) {
+  const live = instances.filter(i => i.alive && i.launched && i.body);
+  for (let i = 0; i < live.length; i++) {
+    for (let j = i + 1; j < live.length; j++) {
+      const instA = live[i];
+      const instB = live[j];
+      const dx   = instA.body.position.x - instB.body.position.x;
+      const dy   = instA.body.position.y - instB.body.position.y;
+      const dist = Math.hypot(dx, dy);
+      const minDist = instA.def.radius + instB.def.radius;
+
+      if (dist < minDist) {
+        // Scale penalty by how deeply they overlap
+        const overlap = (minDist - dist) / minDist;
+        const penalty = overlap * 0.003;
+        instA.spinSpeed = Math.max(0, instA.spinSpeed - penalty);
+        instB.spinSpeed = Math.max(0, instB.spinSpeed - penalty);
+      }
     }
   }
 }
@@ -391,7 +420,7 @@ function _handleCollisionPairs(pairs, isInitial) {
       // Base loss applies immediately; escalating loss kicks in after 10 frames
       // to avoid penalising brief grazing contacts
       const escalation = Math.min(frames / 30, 1.0);
-      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.15;
+      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.04;
 
       _applyCollisionSpinLoss(instA, instB, Math.max(force, 0.5), sustainScale);
       _applyCollisionSpinLoss(instB, instA, Math.max(force, 0.5), sustainScale);
