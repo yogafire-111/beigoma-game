@@ -99,10 +99,13 @@ function startHum(instance) {
   stopHum(instance);
 
   const gainNode = _ctx.createGain();
-  gainNode.gain.value = 0.001;  // start silent, ramp up
-  gainNode.connect(_masterGain);
+  gainNode.gain.value = 0.001;
+  const panner = _ctx.createStereoPanner();
+  panner.pan.value = isPlayer ? -0.8 : 0.8;
+  gainNode.connect(panner);
+  panner.connect(_masterGain);
 
-  const humState = { gainNode, active: true };
+  const humState = { gainNode, panner, active: true };
 
   if (tipType === 'flat') {
     // Sawtooth oscillator + noise blend
@@ -239,6 +242,7 @@ function stopHum(instance) {
     if (state.osc2)        { state.osc2.stop();        state.osc2.disconnect(); }
     if (state.noiseSource) { state.noiseSource.stop(); state.noiseSource.disconnect(); }
     if (state.gainNode)    state.gainNode.disconnect();
+    if (state.panner)      state.panner.disconnect();
   } catch (e) {
     // Ignore stop-before-start errors
   }
