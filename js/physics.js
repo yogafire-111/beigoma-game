@@ -46,7 +46,7 @@ const PHYSICS = {
   // Corner strike / ejection
   CORNER_STRIKE_THRESHOLD: 1.5,
   CORNER_STRIKE_IMPULSE:   14.0,
-  CORNER_STRIKE_CHANCE:    0.35,
+  CORNER_STRIKE_CHANCE:    0.50,
   EJECT_SUPPRESS_FRAMES:   25,   // frames to suppress radial damping after corner strike
 
   // Engine
@@ -100,7 +100,7 @@ function _buildArena() {
 const BODY_PARAMS = {
   friction:    0.03,
   frictionAir: 0.001,
-  restitution: 0.30,   // baked from debug (was 0.35)
+  restitution: 0.45,   // raised from 0.30 for more knockback
   colLossMult: 0.05,   // baked from debug (was 0.08)
   colSustain:  0.06,
 };
