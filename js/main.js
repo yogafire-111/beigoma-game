@@ -401,6 +401,7 @@ function handlePlayerLaunchButton() {
 
   const inst = gs.playerTop;
   Physics.addTopToWorld(inst, pos.x, pos.y, finalVx, finalVy, result.spin);
+  Sound.startHum(inst);
 
   const btn = document.getElementById('launch-btn');
   if (btn) btn.disabled = true;
@@ -480,6 +481,7 @@ function _updateCpuAnimation() {
     const inst = Game.getGameState().cpuTop;
     if (inst && p) {
       Physics.addTopToWorld(inst, p.x, p.y, p.vx, p.vy, p.spin);
+      Sound.startHum(inst);
     }
   }
 }
@@ -628,6 +630,7 @@ function gameLoop() {
     hitStopFrames--;
   } else if (gs.phase === 'battle' || gs.phase === 'cpu_launch') {
     Physics.updatePhysics(liveInstances);
+    Sound.updateHums(liveInstances);
 
     // Update motion trail history
     for (const inst of liveInstances) {
@@ -757,6 +760,8 @@ function initGame() {
 
 Physics.initPhysics({
   onTopDied: (instance) => {
+    if (instance.ejected) Sound.playEjection();
+    Sound.stopHum(instance);
   },
   onCollision: (instA, instB, force) => {
     if (instA.body && instB.body) {
@@ -765,7 +770,13 @@ Physics.initPhysics({
       const normForce = Math.min(force / 10, 1.0);
       spawnSparks(mx, my, normForce);
       triggerImpact(mx, my, normForce);
+      Sound.playCollision(normForce);
     }
+  },
+  onCornerStrike: (striker, target, force, impulse, selfEjected) => {
+    // Corner strikes are already caught by onCollision for the spark/shake.
+    // No additional sound needed here for now -- the collision sound
+    // scaled by force covers it. Reserved for future crack layering.
   },
 });
 
@@ -778,6 +789,12 @@ function _lerp(a, b, t) {
 // ─── Start ───────────────────────────────────────────────────────────────────
 
 window.addEventListener('load', () => {
+  // Sound.init() must be called on a user gesture.
+  // We hook the confirm button and launch button -- whichever fires first.
+  const _initSound = () => { Sound.init(); };
+  document.getElementById('confirm-btn').addEventListener('click', _initSound, { once: true });
+  document.getElementById('launch-btn').addEventListener('click',   _initSound, { once: true });
+
   initGame();
   requestAnimationFrame(gameLoop);
 });
