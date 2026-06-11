@@ -547,12 +547,15 @@ function _applyCornerStrike(instA, instB, bodyA, bodyB, force) {
   } else {
     const scoreA = instA.spinSpeed * instA.def.stability;
     const scoreB = instB.spinSpeed * instB.def.stability;
-    if (scoreA < scoreB) {
-      striker = instB; strikerBody = bodyB;
-      target  = instA; targetBody  = bodyA;
-    } else {
+    const aIsStriker = Math.abs(scoreA - scoreB) < 0.01
+      ? Math.random() < 0.5
+      : scoreA > scoreB;
+    if (aIsStriker) {
       striker = instA; strikerBody = bodyA;
       target  = instB; targetBody  = bodyB;
+    } else {
+      striker = instB; strikerBody = bodyB;
+      target  = instA; targetBody  = bodyA;
     }
   }
 
