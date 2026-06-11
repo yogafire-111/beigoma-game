@@ -426,7 +426,7 @@ function _handleCollisionPairs(pairs, isInitial) {
       const gfA = GRIND_FACTOR[instA.defId] || 0.70;
       const gfB = GRIND_FACTOR[instB.defId] || 0.70;
       const grindFactor  = Math.max(gfA, gfB);
-      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.028 * grindFactor;
+      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.018 * grindFactor;
 
       _applyCollisionSpinLoss(instA, instB, Math.max(force, 0.5), sustainScale);
       _applyCollisionSpinLoss(instB, instA, Math.max(force, 0.5), sustainScale);
