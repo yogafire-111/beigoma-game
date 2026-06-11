@@ -357,7 +357,13 @@ function _handleCollisionPairs(pairs, isInitial) {
     instA.hasContacted = true;
     instB.hasContacted = true;
 
+    // Track sustained contact duration per pair
+    const pairKey = [_instanceId(instA), _instanceId(instB)].sort().join('|');
+
     if (isInitial) {
+      // Reset contact counter on fresh collision
+      _contactFrames[pairKey] = 0;
+
       _applyCollisionSpinLoss(instA, instB, force, 1.0);
       _applyCollisionSpinLoss(instB, instA, force, 1.0);
       _applyDeflection(instA, bodyA, bodyB, force);
@@ -378,12 +384,38 @@ function _handleCollisionPairs(pairs, isInitial) {
       if (onCollision) onCollision(instA, instB, force);
 
     } else {
-      if (force < 1.5) {
-        _applyCollisionSpinLoss(instA, instB, 0.4, BODY_PARAMS.colSustain);
-        _applyCollisionSpinLoss(instB, instA, 0.4, BODY_PARAMS.colSustain);
+      // Sustained contact -- increment counter and apply escalating spin loss
+      _contactFrames[pairKey] = (_contactFrames[pairKey] || 0) + 1;
+      const frames = _contactFrames[pairKey];
+
+      // Base loss applies immediately; escalating loss kicks in after 10 frames
+      // to avoid penalising brief grazing contacts
+      const escalation = Math.min(frames / 30, 1.0);
+      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.15;
+
+      _applyCollisionSpinLoss(instA, instB, Math.max(force, 0.5), sustainScale);
+      _applyCollisionSpinLoss(instB, instA, Math.max(force, 0.5), sustainScale);
+
+      // After 45 frames of grinding, apply a separating impulse to break the lock
+      if (frames === 45) {
+        const dx  = bodyB.position.x - bodyA.position.x;
+        const dy  = bodyB.position.y - bodyA.position.y;
+        const mag = Math.hypot(dx, dy) || 1;
+        const sep = 0.006 * body_avgMass(instA, instB);
+        Matter.Body.applyForce(bodyA, bodyA.position, { x: -(dx / mag) * sep, y: -(dy / mag) * sep });
+        Matter.Body.applyForce(bodyB, bodyB.position, { x:  (dx / mag) * sep, y:  (dy / mag) * sep });
       }
     }
   }
+}
+
+const _contactFrames = {};
+
+function body_avgMass(instA, instB) {
+  const bA = instA.body;
+  const bB = instB.body;
+  if (!bA || !bB) return 1;
+  return (bA.mass + bB.mass) / 2;
 }
 
 // ─── Hexagon Impulse ─────────────────────────────────────────────────────────
@@ -558,6 +590,7 @@ function resetPhysics() {
   }
   topBodies    = {};
   topPhysState = {};
+  Object.keys(_contactFrames).forEach(k => delete _contactFrames[k]);
   Object.keys(_instanceRegistry).forEach(k => delete _instanceRegistry[k]);
   _buildArena();
 }
