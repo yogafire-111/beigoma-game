@@ -421,7 +421,12 @@ function _handleCollisionPairs(pairs, isInitial) {
       // Base loss applies immediately; escalating loss kicks in after 10 frames
       // to avoid penalising brief grazing contacts
       const escalation = Math.min(frames / 30, 1.0);
-      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.04;
+      // Per-top grind factor: maru slides off, hajiki is erratic, nomaru/riki are equivalent round grinders.
+      const GRIND_FACTOR = { nomaru: 0.70, riki: 0.70, maru: 0.52, hajiki: 0.64 };
+      const gfA = GRIND_FACTOR[instA.defId] || 0.70;
+      const gfB = GRIND_FACTOR[instB.defId] || 0.70;
+      const grindFactor  = Math.max(gfA, gfB);
+      const sustainScale = BODY_PARAMS.colSustain + escalation * 0.028 * grindFactor;
 
       _applyCollisionSpinLoss(instA, instB, Math.max(force, 0.5), sustainScale);
       _applyCollisionSpinLoss(instB, instA, Math.max(force, 0.5), sustainScale);
