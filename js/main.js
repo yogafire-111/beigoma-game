@@ -758,7 +758,7 @@ function initGame() {
 
 // ─── Collision Callback ──────────────────────────────────────────────────────
 
-Physics.initPhysics({
+const _mainCallbacks = {
   onTopDied: (instance) => {
     if (instance.ejected) Sound.playEjection();
     Sound.stopHum(instance);
@@ -774,11 +774,12 @@ Physics.initPhysics({
     }
   },
   onCornerStrike: (striker, target, force, impulse, selfEjected) => {
-    // Corner strikes are already caught by onCollision for the spark/shake.
-    // No additional sound needed here for now -- the collision sound
-    // scaled by force covers it. Reserved for future crack layering.
+    // Reserved for future crack layering.
   },
-});
+};
+window._physicsCallbacks = _mainCallbacks;
+
+Physics.initPhysics(_mainCallbacks);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

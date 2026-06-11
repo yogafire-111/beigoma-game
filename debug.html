@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -487,6 +488,7 @@
 <script src="js/tops.js"></script>
 <script src="js/physics.js"></script>
 <script src="js/game.js"></script>
+<script src="js/sound.js"></script>
 <script src="js/main.js"></script>
 
 <script>
@@ -739,6 +741,7 @@ document.getElementById('btn-reset').addEventListener('click', () => {
 });
 
 document.getElementById('btn-launch').addEventListener('click', () => {
+  Sound.init();
   handlePlayerLaunchButton();
 });
 
@@ -833,8 +836,13 @@ function _updateTopReadout(inst, posId, velId, spinId, tiltId) {
 // ── Log hooks ─────────────────────────────────────────────────────────────────
 
 function installLogHooks() {
+  // Do NOT call Physics.initPhysics() here -- main.js already initialized it.
+  // Instead grab the callbacks main.js registered and wrap them.
+  const existing = window._physicsCallbacks || {};
+
   Physics.initPhysics({
     onTopDied: (instance) => {
+      if (existing.onTopDied) existing.onTopDied(instance);
       const cause = instance.ejected     ? 'EJECTED'
                   : instance.sideContact ? 'side-contact'
                   : 'spin-decay';
@@ -844,13 +852,7 @@ function installLogHooks() {
       );
     },
     onCollision: (instA, instB, force) => {
-      if (instA.body && instB.body) {
-        const mx = (instA.body.position.x + instB.body.position.x) / 2;
-        const my = (instA.body.position.y + instB.body.position.y) / 2;
-        const normForce = Math.min(force / 10, 1.0);
-        spawnSparks(mx, my, normForce);
-        triggerImpact(mx, my, normForce);
-      }
+      if (existing.onCollision) existing.onCollision(instA, instB, force);
       const spinA = (instA.spinSpeed || 0).toFixed(3);
       const spinB = (instB.spinSpeed || 0).toFixed(3);
       const velA  = instA.body ? Math.hypot(instA.body.velocity.x, instA.body.velocity.y).toFixed(2) : '?';
@@ -861,6 +863,7 @@ function installLogHooks() {
       );
     },
     onCornerStrike: (striker, target, force, impulse, selfEjected) => {
+      if (existing.onCornerStrike) existing.onCornerStrike(striker, target, force, impulse, selfEjected);
       const selfNote = selfEjected ? ' self-ejected!' : '';
       logEvent('corner-strike',
         `⚡ ${striker.def.hiragana} → ${target.def.hiragana}${selfNote}`,
