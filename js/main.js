@@ -314,11 +314,8 @@ function drawAllTops() {
     }
     if (!inst.launched && inst.owner === 'cpu') {
       if (cpuAnimating) {
-        const pos  = _cpuLaunchPos();
-        const prog = cpuAnimProgress;
-        const px   = CX + (pos.x - CX) * (1 - prog) * 0.3 + (pos.x - CX) * prog;
-        const py   = CY + (pos.y - CY) * prog;
-        _drawTopAt(inst, px, py, 0, false, 0);
+        const pos = _cpuLaunchPos();
+        _drawTopAt(inst, pos.x, pos.y, 0, false, 0);
       }
       continue;
     }

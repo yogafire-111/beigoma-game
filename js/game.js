@@ -174,21 +174,21 @@ function _calculateCpuLaunch() {
     targetAngle = Math.PI + (Math.random() - 0.5) * 0.6;
   }
 
-  // Apply skill-based aim error
-  const finalAngle = targetAngle + (Math.random() - 0.5) * aimSpread;
+  // CPU always launches from the top of the bowl, directly opposite the player.
+  // Small lateral spread for variety.
+  const lateralSpread = (Math.random() - 0.5) * r * 0.3;
+  const launchX = cx + lateralSpread;
+  const launchY = cy - r * 0.72;
 
-  // Spin and speed scale with CPU skill, matching the same range a player
-  // would get at equivalent skill. Small random variance added on top.
+  // Aim downward toward center with skill-based spread
+  const baseAngle  = Math.PI / 2; // straight down
+  const finalAngle = baseAngle + (Math.random() - 0.5) * aimSpread;
+
   const baseSpin  = _lerp(GAME.CPU_SPIN_BASE, GAME.CPU_SPIN_MAX, skillT);
   const baseSpeed = _lerp(GAME.CPU_SPEED_BASE, GAME.CPU_SPEED_MAX, skillT);
-  const finalSpin  = Math.min(1.0, baseSpin  + (Math.random() - 0.5) * 0.15);
-  const speed      = baseSpeed + (Math.random() - 0.5) * 0.5;
+  const finalSpin = Math.min(1.0, baseSpin  + (Math.random() - 0.5) * 0.15);
+  const speed     = baseSpeed + (Math.random() - 0.5) * 0.5;
 
-  // CPU launch position: from the rim opposite to aim direction
-  const launchX = cx + Math.cos(finalAngle + Math.PI) * (r * 0.72);
-  const launchY = cy + Math.sin(finalAngle + Math.PI) * (r * 0.72);
-
-  // Velocity toward target
   const vx = Math.cos(finalAngle) * speed;
   const vy = Math.sin(finalAngle) * speed;
 
