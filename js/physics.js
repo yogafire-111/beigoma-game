@@ -505,9 +505,11 @@ function _applyDeflection(instance, ownBody, otherBody, force) {
     const awayY = ownBody.position.y - otherBody.position.y;
     const mag   = Math.hypot(awayX, awayY) || 1;
     const spd   = Math.hypot(dvx, dvy);
+    // Enforce minimum separation speed so slow-speed contacts don't create orbits
+    const sepSpd = Math.max(spd * 0.85, 2.2);
     Matter.Body.setVelocity(ownBody, {
-      x: (awayX / mag) * spd * 0.85,
-      y: (awayY / mag) * spd * 0.85,
+      x: (awayX / mag) * sepSpd,
+      y: (awayY / mag) * sepSpd,
     });
 
   } else if (instance.defId === 'hajiki') {
