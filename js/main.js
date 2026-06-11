@@ -665,6 +665,7 @@ function gameLoop() {
   if (gs.phase === 'battle') {
     const result = Game.updateBattle(liveInstances);
     if (result) {
+      Sound.stopAllHums();
       _setStatusMessage(
         result.result === 'player_win' ? '勝ち！' :
         result.result === 'cpu_win'    ? '負け...' : '引き分け',
