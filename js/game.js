@@ -10,7 +10,7 @@ const GAME = {
   DRAW_MARGIN_SECONDS:   0.5,    // if both die within this window, it's a draw
 
   // CPU
-  CPU_LAUNCH_DELAY:      90,     // frames to wait before CPU launches (feels natural)
+  CPU_LAUNCH_DELAY:      0,      // launch simultaneously with player
   CPU_AIM_SPREAD_BASE:   0.28,   // base aim error in radians (skill 0)
   CPU_AIM_SPREAD_MIN:    0.04,   // minimum aim error at max skill
 
@@ -119,28 +119,25 @@ function playerLaunch(aimAngle, spinSpeed) {
   const missChance = _lerp(GAME.MISS_ARENA_CHANCE_BASE, GAME.MISS_ARENA_CHANCE_MIN, skill / GAME.SKILL_MAX);
   const aimSpread  = _lerp(GAME.PLAYER_AIM_SPREAD_BASE, GAME.PLAYER_AIM_SPREAD_MIN, skill / GAME.SKILL_MAX);
 
-  const missed = Math.random() < missChance;
+  const missed     = Math.random() < missChance;
   const finalAngle = aimAngle + (Math.random() - 0.5) * aimSpread;
   const finalSpin  = Math.max(0.1, spinSpeed + (Math.random() - 0.5) * 0.15);
 
-  gameState.phase = 'cpu_launch';
-
-  return { angle: finalAngle, spin: finalSpin, missed };
-}
-
-// Called every frame during cpu_launch phase.
-// Returns launch params when ready, null otherwise.
-function updateCpuLaunch() {
-  if (gameState.phase !== 'cpu_launch') return null;
-
-  gameState.cpuLaunchTimer--;
-  if (gameState.cpuLaunchTimer > 0) return null;
-
-  // CPU is ready to launch
-  const params = _calculateCpuLaunch();
-  gameState.phase = 'battle';
+  // Launch CPU simultaneously -- skip cpu_launch phase
+  const cpuParams = _calculateCpuLaunch();
+  gameState.phase          = 'battle';
   gameState.battleStartTime = Date.now();
 
+  return { angle: finalAngle, spin: finalSpin, missed, cpuParams };
+}
+
+// Called every frame during cpu_launch phase -- kept for compatibility but
+// now only reached if somehow phase is still cpu_launch (should not happen).
+function updateCpuLaunch() {
+  if (gameState.phase !== 'cpu_launch') return null;
+  const params = _calculateCpuLaunch();
+  gameState.phase           = 'battle';
+  gameState.battleStartTime = Date.now();
   return params;
 }
 

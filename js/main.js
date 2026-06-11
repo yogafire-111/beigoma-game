@@ -403,6 +403,11 @@ function handlePlayerLaunchButton() {
   Physics.addTopToWorld(inst, pos.x, pos.y, finalVx, finalVy, result.spin);
   Sound.startHum(inst);
 
+  // Launch CPU simultaneously
+  if (result.cpuParams) {
+    _startCpuAnimation(result.cpuParams);
+  }
+
   const btn = document.getElementById('launch-btn');
   if (btn) btn.disabled = true;
 }
@@ -654,13 +659,6 @@ function gameLoop() {
   }
 
   _updateCpuAnimation();
-
-  if (gs.phase === 'cpu_launch') {
-    const params = Game.updateCpuLaunch();
-    if (params) {
-      _startCpuAnimation(params);
-    }
-  }
 
   if (gs.phase === 'battle') {
     const result = Game.updateBattle(liveInstances);

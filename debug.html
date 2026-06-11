@@ -648,7 +648,13 @@ function handlePlayerLaunchButton() {
     result.spin
   );
   Sound.startHum(gs.playerTop);
-  setStatus('Player launched', 'ok');
+
+  // Launch CPU simultaneously
+  if (result.cpuParams) {
+    _startCpuAnimation(result.cpuParams);
+  }
+
+  setStatus('Both launched', 'ok');
 }
 
 function showTopSelection(callback) {
